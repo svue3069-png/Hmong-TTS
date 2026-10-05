@@ -27,7 +27,7 @@ interface AcousticSettingsHoverGuideProps {
     pitch: number;
     toneEmphasis: number;
     prosody: number;
-  }) => void;
+  }, presetName: string) => void;
   currentRate: number;
   currentPitch: number;
   currentToneEmphasis: number;
@@ -151,7 +151,7 @@ export const AcousticSettingsHoverGuide: React.FC<AcousticSettingsHoverGuideProp
             {PRESETS.map((p, idx) => (
               <button
                 key={idx}
-                onClick={() => onApplyPreset(p.config)}
+                onClick={() => onApplyPreset(p.config, p.name)}
                 className="flex items-start justify-between p-2 rounded-xl bg-slate-900 hover:bg-teal-950/60 border border-slate-800 hover:border-teal-500/50 transition text-left group"
               >
                 <div>

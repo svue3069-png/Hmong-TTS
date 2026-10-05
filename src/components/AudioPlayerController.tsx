@@ -232,71 +232,58 @@ export const AudioPlayerController: React.FC<AudioPlayerControllerProps> = ({
             <Rewind className="w-4 h-4" />
           </button>
 
-          {/* Combined Primary Button: Hais Lus (Speak Hmong) & Track Playback */}
-          {!isPlaying ? (
-            <button
-              onClick={() => {
-                if (isEnded) {
-                  onRelisten();
-                } else if (track) {
-                  onPlay();
-                } else if (onRenderAndPlay) {
-                  onRenderAndPlay();
-                }
-              }}
-              disabled={!track && !hasText}
-              className={`flex items-center gap-2.5 px-6 py-2.5 rounded-xl text-sm font-bold text-white shadow-xl transition active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed group ${
-                isEnded
-                  ? 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-950/60 ring-1 ring-emerald-400/40'
-                  : engineType === 'web_speech'
-                  ? 'bg-sky-600 hover:bg-sky-500 shadow-sky-950/60'
-                  : 'bg-teal-600 hover:bg-teal-500 shadow-teal-950/60'
-              }`}
-              title={
-                isEnded
-                  ? 'Hais Dua (Relisten): play track from beginning'
-                  : isPaused
-                  ? 'Hais Ntxiv (Resume playback)'
-                  : track
-                  ? 'Play track'
-                  : 'Synthesize & Speak Speech'
+          {/* Primary Button: Unified Play / Pause Toggle & Synthesize Speech */}
+          <button
+            onClick={() => {
+              if (track || isPaused || isPlaying || isEnded) {
+                onTogglePlayPause();
+              } else if (onRenderAndPlay) {
+                onRenderAndPlay();
               }
-            >
-              {isSynthesizing ? (
-                <>
-                  <RotateCcw className="w-4 h-4 animate-spin text-teal-200" />
-                  <span>Synthesizing...</span>
-                </>
-              ) : isEnded ? (
-                <>
-                  <RotateCcw className="w-4 h-4 group-hover:-rotate-90 transition-transform" />
-                  <span>Hais Dua (Relisten)</span>
-                </>
-              ) : isPaused ? (
-                <>
-                  <Play className="w-4 h-4 fill-current group-hover:scale-110 transition-transform" />
-                  <span>Hais Ntxiv (Resume)</span>
-                </>
-              ) : (
-                <>
-                  <Play className="w-4 h-4 fill-current group-hover:scale-110 transition-transform" />
-                  <span>
-                    {speakButtonLabel ||
-                      (engineType === 'web_speech' ? 'Speak (English)' : 'Hais Lus (Speak Hmong)')}
-                  </span>
-                </>
-              )}
-            </button>
-          ) : (
-            <button
-              onClick={onPause}
-              className="flex items-center gap-2.5 px-6 py-2.5 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-sm font-bold shadow-xl shadow-amber-950/60 transition active:scale-95 animate-pulse"
-              title="Pause speech playback"
-            >
-              <Pause className="w-4 h-4 fill-current" />
-              <span>Xum Hais (Pause)</span>
-            </button>
-          )}
+            }}
+            disabled={!track && !hasText}
+            className={`flex items-center gap-2.5 px-6 py-2.5 rounded-xl text-sm font-bold text-white shadow-xl transition active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed group ${
+              isPlaying
+                ? 'bg-amber-600 hover:bg-amber-500 shadow-amber-950/60 animate-pulse'
+                : engineType === 'web_speech'
+                ? 'bg-sky-600 hover:bg-sky-500 shadow-sky-950/60'
+                : 'bg-teal-600 hover:bg-teal-500 shadow-teal-950/60'
+            }`}
+            title={
+              isPlaying
+                ? 'Pause playback (Press to pause)'
+                : isPaused
+                ? 'Resume playback (Press to play)'
+                : track
+                ? 'Play track (Press to play)'
+                : 'Synthesize & Speak Speech'
+            }
+          >
+            {isSynthesizing ? (
+              <>
+                <RotateCcw className="w-4 h-4 animate-spin text-teal-200" />
+                <span>Synthesizing...</span>
+              </>
+            ) : isPlaying ? (
+              <>
+                <Pause className="w-4 h-4 fill-current group-hover:scale-110 transition-transform" />
+                <span>Xum Hais (Pause)</span>
+              </>
+            ) : isPaused ? (
+              <>
+                <Play className="w-4 h-4 fill-current group-hover:scale-110 transition-transform" />
+                <span>Hais Ntxiv (Resume)</span>
+              </>
+            ) : (
+              <>
+                <Play className="w-4 h-4 fill-current group-hover:scale-110 transition-transform" />
+                <span>
+                  {speakButtonLabel ||
+                    (engineType === 'web_speech' ? 'Speak (English)' : 'Hais Lus (Speak Hmong)')}
+                </span>
+              </>
+            )}
+          </button>
 
           {/* Skip Forward +2s */}
           <button

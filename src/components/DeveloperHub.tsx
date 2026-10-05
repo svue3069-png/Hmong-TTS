@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
 import { CODE_SNIPPETS } from '../sdk/codeSnippets';
-import { Copy, Check, Terminal, Smartphone, Code2, Globe, Send, Play, Download } from 'lucide-react';
+import { Copy, Check, Terminal, Smartphone, Code2, Globe, Send, Play, Download, FolderArchive } from 'lucide-react';
 import { HmongTTSClient } from '../sdk/HmongTTSClient';
 import { HmongDialect } from '../engine/hmongPhonology';
+import { BatchProcessingTab } from './BatchProcessingTab';
 
 export const DeveloperHub: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'javascript' | 'reactNative' | 'flutter' | 'restApi'>('javascript');
+  const [activeTab, setActiveTab] = useState<'javascript' | 'reactNative' | 'flutter' | 'restApi' | 'batch'>('javascript');
   const [copied, setCopied] = useState(false);
 
   // Live API Sandbox state
@@ -20,9 +21,13 @@ export const DeveloperHub: React.FC = () => {
   const client = new HmongTTSClient({ dialect: sandboxDialect });
 
   const handleCopy = () => {
-    navigator.clipboard.writeText(CODE_SNIPPETS[activeTab].code);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    if (activeTab === 'batch') return;
+    const snippet = CODE_SNIPPETS[activeTab as keyof typeof CODE_SNIPPETS];
+    if (snippet) {
+      navigator.clipboard.writeText(snippet.code);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
   };
 
   const handleRunSandbox = async () => {
@@ -116,33 +121,49 @@ export const DeveloperHub: React.FC = () => {
           <Terminal className="w-4 h-4 text-amber-400" />
           <span>REST API / cURL</span>
         </button>
+
+        <button
+          onClick={() => setActiveTab('batch')}
+          className={`flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg transition ${
+            activeTab === 'batch'
+              ? 'bg-teal-600 text-white shadow-sm'
+              : 'text-slate-400 hover:text-white'
+          }`}
+        >
+          <FolderArchive className="w-4 h-4 text-emerald-400" />
+          <span>Batch Processing (ZIP)</span>
+        </button>
       </div>
 
-      {/* Code Display Box */}
-      <div className="rounded-xl border border-slate-800 bg-slate-950 overflow-hidden">
-        <div className="flex items-center justify-between px-4 py-3 bg-slate-900/90 border-b border-slate-800">
-          <div className="flex items-center gap-2">
-            <span className="w-3 h-3 rounded-full bg-rose-500/80 inline-block" />
-            <span className="w-3 h-3 rounded-full bg-amber-500/80 inline-block" />
-            <span className="w-3 h-3 rounded-full bg-emerald-500/80 inline-block" />
-            <span className="ml-2 text-xs font-mono text-slate-300">
-              {CODE_SNIPPETS[activeTab].filename}
-            </span>
+      {activeTab === 'batch' ? (
+        <BatchProcessingTab />
+      ) : (
+        <>
+          {/* Code Display Box */}
+          <div className="rounded-xl border border-slate-800 bg-slate-950 overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-3 bg-slate-900/90 border-b border-slate-800">
+              <div className="flex items-center gap-2">
+                <span className="w-3 h-3 rounded-full bg-rose-500/80 inline-block" />
+                <span className="w-3 h-3 rounded-full bg-amber-500/80 inline-block" />
+                <span className="w-3 h-3 rounded-full bg-emerald-500/80 inline-block" />
+                <span className="ml-2 text-xs font-mono text-slate-300">
+                  {CODE_SNIPPETS[activeTab]?.filename || 'snippet.ts'}
+                </span>
+              </div>
+
+              <button
+                onClick={handleCopy}
+                className="flex items-center gap-1.5 px-3 py-1 text-xs font-medium text-slate-300 bg-slate-800 hover:bg-slate-700 rounded-md transition"
+              >
+                {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                <span>{copied ? 'Copied!' : 'Copy Code'}</span>
+              </button>
+            </div>
+
+            <div className="p-4 overflow-x-auto max-h-[420px] font-mono text-xs text-slate-300 leading-relaxed">
+              <pre>{CODE_SNIPPETS[activeTab]?.code || ''}</pre>
+            </div>
           </div>
-
-          <button
-            onClick={handleCopy}
-            className="flex items-center gap-1.5 px-3 py-1 text-xs font-medium text-slate-300 bg-slate-800 hover:bg-slate-700 rounded-md transition"
-          >
-            {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-            <span>{copied ? 'Copied!' : 'Copy Code'}</span>
-          </button>
-        </div>
-
-        <div className="p-4 overflow-x-auto max-h-[420px] font-mono text-xs text-slate-300 leading-relaxed">
-          <pre>{CODE_SNIPPETS[activeTab].code}</pre>
-        </div>
-      </div>
 
       {/* Interactive API Sandbox */}
       <div className="p-5 rounded-xl border border-slate-800 bg-slate-900/60">
@@ -248,6 +269,8 @@ export const DeveloperHub: React.FC = () => {
           </div>
         )}
       </div>
+        </>
+      )}
     </div>
   );
 };

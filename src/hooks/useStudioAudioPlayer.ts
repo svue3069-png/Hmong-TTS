@@ -438,6 +438,32 @@ export function useStudioAudioPlayer(options: UseStudioAudioPlayerOptions = {}) 
     a.click();
   }, [track]);
 
+  // Clear track and reset player to blank
+  const clearTrack = useCallback(() => {
+    if (audioElementRef.current) {
+      audioElementRef.current.pause();
+      audioElementRef.current.src = '';
+      audioElementRef.current = null;
+    }
+    if (animFrameRef.current) {
+      cancelAnimationFrame(animFrameRef.current);
+      animFrameRef.current = null;
+    }
+    if (track?.url) {
+      try {
+        URL.revokeObjectURL(track.url);
+      } catch (_) {}
+    }
+    setTrack(null);
+    setIsPlaying(false);
+    setIsPaused(false);
+    setIsEnded(false);
+    setCurrentTime(0);
+    setDuration(0);
+    setCurrentWordIdx(null);
+    options.onWordHighlight?.(null);
+  }, [track, options]);
+
   return {
     track,
     isPlaying,
@@ -461,5 +487,6 @@ export function useStudioAudioPlayer(options: UseStudioAudioPlayerOptions = {}) 
     toggleLoop,
     setAudioVolume,
     downloadTrackWav,
+    clearTrack,
   };
 }

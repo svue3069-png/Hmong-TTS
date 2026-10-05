@@ -84,19 +84,6 @@ const PRESET_PHRASES = [
     category: 'mixed',
     text: 'Nyob zoo! Please check in at the reception desk to see the doctor.',
   },
-  {
-    label: 'Bilingual Gratitude',
-    category: 'mixed',
-    text: 'Ua tsaug ntau for joining our community meeting today!',
-  },
-  {
-    label: 'Traditional Wisdom (Paj Lug)',
-    category: 'hmong',
-    dawb: 'Yuav hais lus kom xav zoo zoo, txhob hais lus phem.',
-    leeg: 'Yuav has lug kuas xaav zoo zoo, txhob has lug phem.',
-    english: 'Think carefully before speaking; avoid hurtful words.',
-    text: 'Yuav hais lus kom xav zoo zoo, txhob hais lus phem.',
-  },
 ];
 
 export type ColorTheme = 'indigo' | 'jade' | 'amber' | 'slate';
@@ -153,6 +140,13 @@ export default function App() {
   const [isMetadataModalOpen, setIsMetadataModalOpen] = useState<boolean>(false);
   const [currentMetadata, setCurrentMetadata] = useState<SynthesisMetadataExport | null>(null);
   const [theme, setTheme] = useState<ColorTheme>('indigo');
+  const [isHoverGuideOpen, setIsHoverGuideOpen] = useState<boolean>(false);
+  const [appliedPresetToast, setAppliedPresetToast] = useState<string | null>(null);
+  const [showLiveReading, setShowLiveReading] = useState<boolean>(true);
+  const [readingWindowMode, setReadingWindowMode] = useState<'twenty' | 'half' | 'full'>('twenty');
+  const [showWordCount] = useState<boolean>(true);
+  const [isAutoScrollSyncEnabled, setIsAutoScrollSyncEnabled] = useState<boolean>(true);
+  const [manualChunkIndex, setManualChunkIndex] = useState<number>(0);
 
   // Background Theme Configuration (Office-style palette with live hover preview & image upload)
   const [bgConfig, setBgConfig] = useState<BackgroundConfig>(() => {
@@ -630,6 +624,7 @@ export default function App() {
                             onClick={() => {
                               handleStop();
                               setText('');
+                              studioPlayer.clearTrack();
                             }}
                             className="text-xs text-slate-400 hover:text-rose-400 transition underline underline-offset-2"
                           >
@@ -642,7 +637,10 @@ export default function App() {
 
                     <textarea
                       value={text}
-                      onChange={(e) => setText(e.target.value)}
+                      onChange={(e) => {
+                        setText(e.target.value);
+                        studioPlayer.clearTrack();
+                      }}
                       rows={4}
                       placeholder="Type Hmong RPA or English sentence here (e.g. Nyob zoo sawv daws, Haus tshuaj no, or select a preset above)..."
                       className="w-full p-3.5 bg-slate-950/90 border border-slate-800 rounded-xl text-slate-100 placeholder:text-slate-600 font-sans text-base focus:outline-hidden focus:border-teal-500 focus:ring-1 focus:ring-teal-500/30 transition resize-y min-h-[110px]"
@@ -664,33 +662,165 @@ export default function App() {
                     ))}
                   </div>
 
-                  {/* Real-time Karaoke Reading Box */}
-                  <div className="p-4 bg-slate-950/90 rounded-xl border border-slate-800/80 min-h-[85px] flex items-center">
-                    <div className="leading-relaxed text-base flex flex-wrap gap-1.5 w-full">
-                      {displayTokens.length === 0 ? (
-                        <span className="text-slate-600 text-sm italic">
-                          Real-time syllable highlighting will appear here when speaking...
-                        </span>
-                      ) : (
-                        displayTokens.map((item, idx) => {
-                          const isCurrent = currentWordIdx === idx;
-                          return (
-                            <span
-                              key={idx}
-                              className={`rounded px-1.5 py-0.5 transition-all duration-100 ${
-                                isCurrent
-                                  ? resolvedEngine === 'web_speech'
-                                    ? 'bg-sky-500 text-slate-950 font-bold scale-105 shadow-md shadow-sky-500/20'
-                                    : 'bg-teal-500 text-slate-950 font-bold scale-105 shadow-md shadow-teal-500/20'
-                                  : 'text-slate-300'
+                  {/* Real-time Karaoke Reading Box (Optional display with Half / 6 / Full & Optional Word Count) */}
+                  <div className="p-4 bg-slate-950/90 rounded-xl border border-slate-800/80 space-y-2.5">
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono text-slate-400 border-b border-slate-900 pb-2">
+                      <div className="flex items-center gap-2">
+                        <span>Live Reading Window</span>
+                        {displayTokens.length > 0 && showLiveReading && (
+                          <span className="text-teal-400 bg-teal-950/60 px-2 py-0.5 rounded border border-teal-800/40">
+                            Word {(currentWordIdx ?? 0) + 1} of {displayTokens.length}
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        {/* 20 Words / Half Text / Full Text Window Mode Selector */}
+                        {showLiveReading && displayTokens.length > 0 && (
+                          <div className="flex items-center gap-1 bg-slate-900 p-0.5 rounded-lg border border-slate-800 text-[10px]">
+                            <button
+                              onClick={() => setReadingWindowMode('twenty')}
+                              className={`px-2 py-0.5 rounded transition ${
+                                readingWindowMode === 'twenty'
+                                  ? 'bg-teal-600 text-white font-bold'
+                                  : 'text-slate-400 hover:text-white'
                               }`}
+                              title="Show 20 Words Window"
                             >
-                              {item.token}
-                            </span>
-                          );
-                        })
-                      )}
+                              20 Words
+                            </button>
+                            <button
+                              onClick={() => setReadingWindowMode('half')}
+                              className={`px-2 py-0.5 rounded transition ${
+                                readingWindowMode === 'half'
+                                  ? 'bg-teal-600 text-white font-bold'
+                                  : 'text-slate-400 hover:text-white'
+                              }`}
+                              title="Show Half Text"
+                            >
+                              Half Text
+                            </button>
+                            <button
+                              onClick={() => setReadingWindowMode('full')}
+                              className={`px-2 py-0.5 rounded transition ${
+                                readingWindowMode === 'full'
+                                  ? 'bg-teal-600 text-white font-bold'
+                                  : 'text-slate-400 hover:text-white'
+                              }`}
+                              title="Show Full Text"
+                            >
+                              Full Text
+                            </button>
+                          </div>
+                        )}
+
+                        {/* Auto-Scroll Sync Toggle */}
+                        {showLiveReading && displayTokens.length > 0 && (
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={() => {
+                                const next = !isAutoScrollSyncEnabled;
+                                setIsAutoScrollSyncEnabled(next);
+                                if (!next) {
+                                  const chunkSize = readingWindowMode === 'half' ? Math.ceil(displayTokens.length / 2) : readingWindowMode === 'twenty' ? 20 : displayTokens.length;
+                                  const activeIdx = currentWordIdx ?? 0;
+                                  setManualChunkIndex(Math.floor(activeIdx / chunkSize));
+                                }
+                              }}
+                              className={`px-2 py-0.5 rounded text-[10px] font-mono transition border ${
+                                isAutoScrollSyncEnabled
+                                  ? 'bg-teal-950/80 border-teal-600/60 text-teal-300 font-bold'
+                                  : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
+                              }`}
+                              title={isAutoScrollSyncEnabled ? 'Auto-sync ON: Player syncs view automatically' : 'Auto-sync OFF: Manual exploration enabled'}
+                            >
+                              {isAutoScrollSyncEnabled ? 'Sync: ON' : 'Sync: OFF'}
+                            </button>
+
+                            {!isAutoScrollSyncEnabled && readingWindowMode !== 'full' && (
+                              <div className="flex items-center gap-0.5 bg-slate-900 p-0.5 rounded border border-slate-800 text-[10px]">
+                                <button
+                                  onClick={() => setManualChunkIndex(prev => Math.max(0, prev - 1))}
+                                  disabled={manualChunkIndex <= 0}
+                                  className="px-1.5 py-0.5 text-slate-300 hover:text-white disabled:opacity-30"
+                                  title="Previous Part"
+                                >
+                                  ◀
+                                </button>
+                                <span className="text-slate-400 font-mono px-1">
+                                  Part {manualChunkIndex + 1}/{Math.ceil(displayTokens.length / (readingWindowMode === 'half' ? Math.ceil(displayTokens.length / 2) : 20)) || 1}
+                                </span>
+                                <button
+                                  onClick={() => setManualChunkIndex(prev => Math.min(Math.ceil(displayTokens.length / (readingWindowMode === 'half' ? Math.ceil(displayTokens.length / 2) : 20)) - 1, prev + 1))}
+                                  disabled={manualChunkIndex >= Math.ceil(displayTokens.length / (readingWindowMode === 'half' ? Math.ceil(displayTokens.length / 2) : 20)) - 1}
+                                  className="px-1.5 py-0.5 text-slate-300 hover:text-white disabled:opacity-30"
+                                  title="Next Part"
+                                >
+                                  ▶
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Hide/Show Live Reading Display */}
+                        <button
+                          onClick={() => setShowLiveReading(!showLiveReading)}
+                          className="text-xs text-teal-400 hover:text-teal-300 font-sans font-semibold transition underline underline-offset-2"
+                        >
+                          {showLiveReading ? 'Hide Display' : 'Show Live Reading'}
+                        </button>
+                      </div>
                     </div>
+
+                    {showLiveReading && (
+                      <div className="leading-relaxed text-lg flex flex-wrap gap-2 items-center min-h-[50px] pt-1">
+                        {displayTokens.length === 0 ? (
+                          <span className="text-slate-600 text-sm italic font-sans">
+                            Real-time syllable tracking will highlight words when playing...
+                          </span>
+                        ) : (
+                          (() => {
+                            const chunkSize =
+                              readingWindowMode === 'half'
+                                ? Math.ceil(displayTokens.length / 2)
+                                : readingWindowMode === 'twenty'
+                                ? 20
+                                : displayTokens.length;
+
+                            const activeIdx = currentWordIdx ?? 0;
+                            const totalChunks = Math.ceil(displayTokens.length / chunkSize) || 1;
+                            const currentChunk = readingWindowMode === 'full'
+                              ? 0
+                              : isAutoScrollSyncEnabled
+                              ? Math.min(totalChunks - 1, Math.floor(activeIdx / chunkSize))
+                              : Math.min(totalChunks - 1, manualChunkIndex);
+
+                            const startIdx = readingWindowMode === 'full' ? 0 : currentChunk * chunkSize;
+                            const endIdx = readingWindowMode === 'full' ? displayTokens.length : Math.min(displayTokens.length, startIdx + chunkSize);
+
+                            return displayTokens.slice(startIdx, endIdx).map((item, localIdx) => {
+                              const actualIdx = startIdx + localIdx;
+                              const isCurrent = currentWordIdx === actualIdx;
+                              return (
+                                <span
+                                  key={actualIdx}
+                                  className={`rounded px-2.5 py-1 transition-all duration-150 ${
+                                    isCurrent
+                                      ? resolvedEngine === 'web_speech'
+                                        ? 'bg-sky-500 text-slate-950 font-extrabold scale-110 shadow-lg shadow-sky-500/30'
+                                        : 'bg-teal-500 text-slate-950 font-extrabold scale-110 shadow-lg shadow-teal-500/30'
+                                      : 'text-slate-300 bg-slate-900/60 border border-slate-800/80'
+                                  }`}
+                                >
+                                  {item.token}
+                                </span>
+                              );
+                            });
+                          })()
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   {/* Persistent Audio Player Controller with Combined Play & Hais Lus (Speak Hmong) */}
@@ -810,39 +940,59 @@ export default function App() {
               {/* Right Column: Voice & Acoustic Tuning Controls */}
               <div className="space-y-4">
                 <div className={`p-5 rounded-2xl border ${currentTheme.border} ${currentTheme.surface} space-y-5 shadow-xl`}>
-                  <div className="flex items-center justify-between relative group">
+                  <div className="flex items-center justify-between relative">
                     <div className="flex items-center gap-2">
                       <Sliders className="w-4 h-4 text-teal-400" />
                       <h3 className="text-sm font-bold text-slate-200">Native Acoustic Settings</h3>
                     </div>
 
-                    {/* Interactive Hover Phonetics Guide Trigger Badge */}
+                    {/* Clickable Acoustic Guide & Presets Toggle (No Hover) */}
                     <div className="relative">
-                      <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-teal-950/80 border border-teal-800/60 text-teal-300 text-xs font-mono cursor-help transition hover:bg-teal-900 hover:border-teal-400 shadow-sm group-hover:bg-teal-900 group-hover:border-teal-400">
+                      <button
+                        onClick={() => setIsHoverGuideOpen(!isHoverGuideOpen)}
+                        className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-teal-950/80 border border-teal-800/60 text-teal-300 text-xs font-mono transition active:scale-95 shadow-sm"
+                      >
                         <Info className="w-3.5 h-3.5 text-teal-400" />
-                        <span>Hover Guide</span>
-                      </div>
+                        <span>{isHoverGuideOpen ? 'Close Guide' : 'Acoustic Guide & Presets'}</span>
+                      </button>
 
-                      {/* Flying Hover Guide Card */}
-                      <div className="absolute right-0 top-full mt-2.5 z-50 hidden group-hover:block hover:block pointer-events-auto shadow-2xl">
-                        <AcousticSettingsHoverGuide
-                          currentRate={rate}
-                          currentPitch={pitch}
-                          currentToneEmphasis={toneEmphasis}
-                          currentProsody={prosody}
-                          onApplyPreset={(p) => {
-                            setRate(p.rate);
-                            setPitch(p.pitch);
-                            setToneEmphasis(p.toneEmphasis);
-                            setProsody(p.prosody);
-                          }}
-                        />
-                      </div>
+                      {/* Guide Card */}
+                      {isHoverGuideOpen && (
+                        <div className="absolute right-0 top-full mt-2.5 z-50 pointer-events-auto shadow-2xl">
+                          <AcousticSettingsHoverGuide
+                            currentRate={rate}
+                            currentPitch={pitch}
+                            currentToneEmphasis={toneEmphasis}
+                            currentProsody={prosody}
+                            onApplyPreset={(p, presetName) => {
+                              setRate(p.rate);
+                              setPitch(p.pitch);
+                              setToneEmphasis(p.toneEmphasis);
+                              setProsody(p.prosody);
+                              setIsHoverGuideOpen(false);
+
+                              setAppliedPresetToast(`✨ Applied: ${presetName}`);
+                              setTimeout(() => setAppliedPresetToast(null), 3500);
+
+                              if (text.trim()) {
+                                handlePlay();
+                              }
+                            }}
+                          />
+                        </div>
+                      )}
                     </div>
                   </div>
 
+                  {appliedPresetToast && (
+                    <div className="p-2.5 rounded-xl bg-teal-950/90 border border-teal-500/60 text-teal-300 text-xs font-semibold flex items-center justify-between animate-in fade-in slide-in-from-top-1 duration-200">
+                      <span>{appliedPresetToast}</span>
+                      <span className="text-[10px] font-mono text-teal-400">Settings updated</span>
+                    </div>
+                  )}
+
                   {/* Active Voice Info */}
-                  {resolvedEngine === 'web_speech' ? (
+                  {resolvedEngine === 'web_speech' && (
                     <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 text-xs space-y-2">
                       <div className="font-semibold text-sky-400 flex items-center gap-1.5">
                         <Globe2 className="w-4 h-4" />
@@ -851,46 +1001,6 @@ export default function App() {
                       <p className="text-slate-400 text-[11px] leading-relaxed">
                         Speech synthesized via browser native Web Speech API with automatic accent selection (en-US).
                       </p>
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      <label className="text-xs font-medium text-slate-400">
-                        Native Hmong Voice Model
-                      </label>
-                      <div className="grid grid-cols-1 gap-2">
-                        {HMONG_VOICE_PROFILES.map((voice) => {
-                          const isSelected = voice.id === selectedVoiceId;
-                          return (
-                            <button
-                              key={voice.id}
-                              onClick={() => {
-                                setSelectedVoiceId(voice.id);
-                                setDialect(voice.dialect);
-                              }}
-                              className={`p-3 rounded-xl border text-left transition flex items-start justify-between ${
-                                isSelected
-                                  ? 'border-teal-500 bg-teal-950/30'
-                                  : 'border-slate-800 bg-slate-950/90 hover:border-slate-700'
-                              }`}
-                            >
-                              <div>
-                                <div className="flex items-center gap-2">
-                                  <span className="text-xs font-bold text-slate-100">{voice.name}</span>
-                                  <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
-                                    voice.dialect === 'dawb' ? 'bg-teal-950 text-teal-300' : 'bg-sky-950 text-sky-300'
-                                  }`}>
-                                    {voice.dialect === 'dawb' ? 'White' : 'Green'}
-                                  </span>
-                                </div>
-                                <p className="text-[11px] text-slate-400 mt-1 line-clamp-1">
-                                  {voice.description}
-                                </p>
-                              </div>
-                              {isSelected && <Check className="w-4 h-4 text-teal-400 shrink-0 mt-0.5" />}
-                            </button>
-                          );
-                        })}
-                      </div>
                     </div>
                   )}
 
