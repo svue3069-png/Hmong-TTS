@@ -1,0 +1,6 @@
+{
+  "name": "HmongTTS - Mobile & Cross-Platform Hmong Voice Engine",
+  "description": "Production-ready Hmong Text-to-Speech synthesis platform supporting Hmoob Dawb (White Hmong) and Moob Leeg (Green Hmong), offline acoustic synthesis, low-latency DSP, and integration SDKs for Web, React Native, and Flutter.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
