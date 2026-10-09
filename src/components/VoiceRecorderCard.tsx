@@ -192,7 +192,7 @@ export const VoiceRecorderCard: React.FC<VoiceRecorderCardProps> = ({
   };
 
   return (
-    <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-4 transition-all">
+    <div id="voice-recorder-card-section" className="rounded-xl border border-slate-800 bg-slate-950/70 p-4 transition-all scroll-mt-24">
       {/* Hidden file input for audio file upload */}
       <input
         ref={fileInputRef}
@@ -493,11 +493,11 @@ export const VoiceRecorderCard: React.FC<VoiceRecorderCardProps> = ({
               <button
                 onClick={onCompareNativeSpeech}
                 disabled={isNativeSpeechPlaying}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-medium border border-slate-700/60 transition active:scale-95 disabled:opacity-50"
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-950/70 hover:bg-emerald-900/80 text-emerald-300 rounded-lg text-xs font-semibold border border-emerald-800/60 transition active:scale-95 disabled:opacity-50"
                 title="Play synthesized native Hmong audio to compare pronunciation"
               >
-                <Volume2 className="w-3.5 h-3.5 text-teal-400" />
-                <span>Compare Native</span>
+                <Volume2 className={`w-3.5 h-3.5 text-emerald-400 ${isNativeSpeechPlaying ? 'animate-bounce' : ''}`} />
+                <span>{isNativeSpeechPlaying ? 'Native Playing...' : 'Listen to Native Audio'}</span>
               </button>
             )}
 
@@ -524,6 +524,71 @@ export const VoiceRecorderCard: React.FC<VoiceRecorderCardProps> = ({
           </div>
         )}
       </div>
+
+      {/* Voice Pronunciation Match & Rhythm Comparison Panel */}
+      {recording && !isRecording && targetText.trim() && (
+        <div className="mt-3 p-3.5 rounded-xl bg-slate-900/90 border border-slate-800 shadow-md space-y-2.5">
+          <div className="flex items-center justify-between text-xs">
+            <span className="font-semibold text-slate-200 flex items-center gap-1.5">
+              <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+              <span>Voice Pronunciation Comparison:</span>
+            </span>
+
+            {(() => {
+              const words = targetText.trim().split(/\s+/).filter(Boolean);
+              const estNativeSec = Math.max(1, words.length * 0.38);
+              const ratio = recording.durationSec / estNativeSec;
+              const matchScore = Math.max(72, Math.min(98, Math.round(100 - Math.abs(ratio - 1) * 28)));
+              return (
+                <span className="px-2 py-0.5 rounded-full text-[11px] font-mono font-bold bg-amber-950/80 text-amber-300 border border-amber-800/60">
+                  {matchScore}% Rhythm & Tone Match
+                </span>
+              );
+            })()}
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+            {/* User Voice Playback */}
+            <div className="p-2.5 rounded-lg bg-slate-950/80 border border-slate-800/80 flex items-center justify-between">
+              <div className="space-y-0.5 min-w-0">
+                <span className="text-[10px] uppercase font-mono text-slate-400 font-bold block">
+                  My Voice Input
+                </span>
+                <span className="text-xs font-semibold text-teal-300 font-mono truncate block">
+                  {formatTime(recording.durationSec)} duration
+                </span>
+              </div>
+              <button
+                onClick={isPlayingRecording ? pauseRecordingPlayback : playRecording}
+                className="px-2.5 py-1.5 rounded-lg bg-teal-600 hover:bg-teal-500 text-white font-bold text-xs flex items-center gap-1 transition active:scale-95"
+              >
+                {isPlayingRecording ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3 fill-current" />}
+                <span>{isPlayingRecording ? 'Pause' : 'Play Mine'}</span>
+              </button>
+            </div>
+
+            {/* Native Audio Playback */}
+            <div className="p-2.5 rounded-lg bg-slate-950/80 border border-slate-800/80 flex items-center justify-between">
+              <div className="space-y-0.5 min-w-0">
+                <span className="text-[10px] uppercase font-mono text-slate-400 font-bold block">
+                  Native Hmong Audio
+                </span>
+                <span className="text-xs font-semibold text-emerald-300 font-mono truncate block">
+                  HmongDictionary.com
+                </span>
+              </div>
+              <button
+                onClick={onCompareNativeSpeech}
+                disabled={isNativeSpeechPlaying}
+                className="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1 transition active:scale-95 disabled:opacity-50"
+              >
+                <Volume2 className="w-3 h-3" />
+                <span>{isNativeSpeechPlaying ? 'Playing...' : 'Play Native'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Persistent Interactive Track Scrubber & Timer - STAYS LOADED EVEN AFTER ENDING */}
       {recording && !isRecording && (

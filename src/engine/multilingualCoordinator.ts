@@ -13,7 +13,7 @@ import { detectLanguage, DetectionResult, DetectedLanguage } from './languageDet
 import { HmongDialect, parseHmongText, SyllableDecomposition } from './hmongPhonology';
 
 export type SpeechEngineMode = 'auto' | 'hmong_dawb' | 'hmong_leeg' | 'english';
-export type ActiveEngineType = 'hmong_dsp' | 'web_speech';
+export type ActiveEngineType = 'hmong_dsp' | 'web_speech' | 'hmongdictionary_native';
 
 export interface MultilingualSpeechOptions {
   mode?: SpeechEngineMode;

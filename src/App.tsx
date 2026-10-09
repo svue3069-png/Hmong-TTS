@@ -35,6 +35,8 @@ import { AudioPlayerController } from './components/AudioPlayerController';
 import { useStudioAudioPlayer } from './hooks/useStudioAudioPlayer';
 import { ThemeColorBackgroundPicker, BackgroundConfig } from './components/ThemeColorBackgroundPicker';
 import { AcousticSettingsHoverGuide } from './components/AcousticSettingsHoverGuide';
+import { FixPronunciationModal } from './components/FixPronunciationModal';
+import { PhrasebookDrawerModal } from './components/PhrasebookDrawerModal';
 import {
   Play,
   Square,
@@ -54,6 +56,8 @@ import {
   Mic,
   Info,
   HelpCircle,
+  BookOpen,
+  Wrench,
 } from 'lucide-react';
 
 // Preset phrases in White Hmong, Green Hmong, English, and Bilingual Code-Switching
@@ -123,6 +127,43 @@ const THEMES: Record<ColorTheme, { name: string; bg: string; surface: string; bo
   },
 };
 
+// Preset highlight colors for Hmong and English modes
+const HMONG_HIGHLIGHT_PRESETS = [
+  { name: 'Teal Traditional (Default)', color: '#14b8a6' },
+  { name: 'Jade Batik', color: '#10b981' },
+  { name: 'Paj Ntaub Rose', color: '#f43f5e' },
+  { name: 'Highland Amber', color: '#f59e0b' },
+  { name: 'Indigo Royal', color: '#6366f1' },
+  { name: 'Electric Cyan', color: '#06b6d4' },
+  { name: 'Lime Citrus', color: '#84cc16' },
+];
+
+const ENGLISH_HIGHLIGHT_PRESETS = [
+  { name: 'Sky Blue (Default)', color: '#0ea5e9' },
+  { name: 'Ocean Blue', color: '#3b82f6' },
+  { name: 'Royal Purple', color: '#8b5cf6' },
+  { name: 'Fuchsia Pink', color: '#d946ef' },
+  { name: 'Vibrant Orange', color: '#f97316' },
+  { name: 'Golden Sun', color: '#eab308' },
+  { name: 'Coral Red', color: '#ef4444' },
+];
+
+function getContrastTextColor(hexColor: string): string {
+  const hex = hexColor.replace('#', '');
+  if (hex.length === 3) {
+    const r = parseInt(hex[0] + hex[0], 16);
+    const g = parseInt(hex[1] + hex[1], 16);
+    const b = parseInt(hex[2] + hex[2], 16);
+    return ((r * 299 + g * 587 + b * 114) / 1000) >= 128 ? '#020617' : '#ffffff';
+  }
+  if (hex.length !== 6) return '#020617';
+  const r = parseInt(hex.substring(0, 2), 16);
+  const g = parseInt(hex.substring(2, 4), 16);
+  const b = parseInt(hex.substring(4, 6), 16);
+  const yiq = (r * 299 + g * 587 + b * 114) / 1000;
+  return yiq >= 128 ? '#020617' : '#ffffff';
+}
+
 export default function App() {
   const [activeTab, setActiveTab] = useState<'studio' | 'tones' | 'references' | 'sdk' | 'offline' | 'accessibility'>('studio');
   const [text, setText] = useState('');
@@ -134,7 +175,8 @@ export default function App() {
   const [toneEmphasis, setToneEmphasis] = useState<number>(1.1);
   const [prosody, setProsody] = useState<number>(1.1);
   const [currentWordIdx, setCurrentWordIdx] = useState<number | null>(null);
-  const [activeEngine, setActiveEngine] = useState<ActiveEngineType>('hmong_dsp');
+  const [activeEngine, setActiveEngine] = useState<ActiveEngineType>('hmongdictionary_native');
+  const [audioSource, setAudioSource] = useState<'hmongdictionary_native' | 'hmong_dsp'>('hmongdictionary_native');
   const [isExporting, setIsExporting] = useState<boolean>(false);
   const [isExportingMetadata, setIsExportingMetadata] = useState<boolean>(false);
   const [isMetadataModalOpen, setIsMetadataModalOpen] = useState<boolean>(false);
@@ -147,6 +189,42 @@ export default function App() {
   const [showWordCount] = useState<boolean>(true);
   const [isAutoScrollSyncEnabled, setIsAutoScrollSyncEnabled] = useState<boolean>(true);
   const [manualChunkIndex, setManualChunkIndex] = useState<number>(0);
+
+  // Spoken Word Highlight Custom Colors for Live Reading Window
+  const [hmongHighlightColor, setHmongHighlightColor] = useState<string>(() => {
+    try {
+      return localStorage.getItem('hmongtts_highlight_hmong') || '#14b8a6';
+    } catch {
+      return '#14b8a6';
+    }
+  });
+  const [englishHighlightColor, setEnglishHighlightColor] = useState<string>(() => {
+    try {
+      return localStorage.getItem('hmongtts_highlight_english') || '#0ea5e9';
+    } catch {
+      return '#0ea5e9';
+    }
+  });
+  const [isReadingColorSettingsOpen, setIsReadingColorSettingsOpen] = useState<boolean>(false);
+
+  const handleUpdateHmongHighlight = (color: string) => {
+    setHmongHighlightColor(color);
+    try {
+      localStorage.setItem('hmongtts_highlight_hmong', color);
+    } catch (_) {}
+  };
+
+  const handleUpdateEnglishHighlight = (color: string) => {
+    setEnglishHighlightColor(color);
+    try {
+      localStorage.setItem('hmongtts_highlight_english', color);
+    } catch (_) {}
+  };
+
+  const handleResetHighlightColors = () => {
+    handleUpdateHmongHighlight('#14b8a6');
+    handleUpdateEnglishHighlight('#0ea5e9');
+  };
 
   // Background Theme Configuration (Office-style palette with live hover preview & image upload)
   const [bgConfig, setBgConfig] = useState<BackgroundConfig>(() => {
@@ -169,6 +247,91 @@ export default function App() {
 
   const activeBg = hoverPreviewBg || bgConfig;
 
+  // Fix Pronunciation Modal State
+  const [isFixModalOpen, setIsFixModalOpen] = useState(false);
+  const [fixModalWord, setFixModalWord] = useState('');
+
+  // Phrasebook Modal State
+  const [isPhrasebookOpen, setIsPhrasebookOpen] = useState(false);
+
+  // Live Reading Window View Mode: 'rpa' (Hmong RPA) | 'respell' (English-friendly respelling) | 'ipa' (IPA Phonetics)
+  const [readingDisplayMode, setReadingDisplayMode] = useState<'rpa' | 'respell' | 'ipa'>('rpa');
+
+  // Quick Microphone Voice Input Dictation State
+  const [isVoiceInputActive, setIsVoiceInputActive] = useState(false);
+  const recognitionRef = React.useRef<any>(null);
+
+  const handleToggleVoiceInput = () => {
+    if (isVoiceInputActive) {
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.stop();
+        } catch (_) {}
+      }
+      setIsVoiceInputActive(false);
+      return;
+    }
+
+    const SpeechRec = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (SpeechRec) {
+      try {
+        const recognition = new SpeechRec();
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        // Attempt browser default or en-US if hmn is unsupported in browser
+        try {
+          recognition.lang = navigator.language || 'en-US';
+        } catch (_) {}
+
+        recognition.onstart = () => {
+          setIsVoiceInputActive(true);
+        };
+
+        recognition.onresult = (event: any) => {
+          let interimTranscript = '';
+          let finalTranscript = '';
+          for (let i = event.resultIndex; i < event.results.length; ++i) {
+            if (event.results[i].isFinal) {
+              finalTranscript += event.results[i][0].transcript;
+            } else {
+              interimTranscript += event.results[i][0].transcript;
+            }
+          }
+          const spoken = (finalTranscript || interimTranscript).trim();
+          if (spoken) {
+            setText((prev) => (prev.trim() ? `${prev.trim()} ${spoken}` : spoken));
+            studioPlayer.clearTrack();
+          }
+        };
+
+        recognition.onerror = (errEvent: any) => {
+          setIsVoiceInputActive(false);
+          // If browser speech recognition failed or was blocked, navigate to microphone recorder
+          const cardEl = document.getElementById('voice-recorder-card-section');
+          if (cardEl) {
+            cardEl.scrollIntoView({ behavior: 'smooth' });
+          }
+        };
+
+        recognition.onend = () => {
+          setIsVoiceInputActive(false);
+        };
+
+        recognitionRef.current = recognition;
+        recognition.start();
+        return;
+      } catch (err) {
+        console.warn('SpeechRecognition initialization note, scrolling to recorder:', err);
+      }
+    }
+
+    // Direct fallback: scroll smoothly to Voice Recording Studio card
+    const cardEl = document.getElementById('voice-recorder-card-section');
+    if (cardEl) {
+      cardEl.scrollIntoView({ behavior: 'smooth' });
+    }
+  };
+
   // Studio Audio Player Hook with Play, Pause, Speed (1x, 2x, 3x), and Persistent Relistening
   const studioPlayer = useStudioAudioPlayer({
     onWordHighlight: (idx) => {
@@ -186,30 +349,38 @@ export default function App() {
   // Determine active effective engine based on mode and detection
   const resolvedEngine: ActiveEngineType = useMemo(() => {
     if (engineMode === 'english') return 'web_speech';
-    if (engineMode === 'hmong_dawb' || engineMode === 'hmong_leeg') return 'hmong_dsp';
-    return detection.language === 'english' ? 'web_speech' : 'hmong_dsp';
-  }, [engineMode, detection.language]);
+    if (detection.language === 'english' && engineMode === 'auto') return 'web_speech';
+    return audioSource === 'hmongdictionary_native' ? 'hmongdictionary_native' : 'hmong_dsp';
+  }, [engineMode, detection.language, audioSource]);
 
   // Current Hmong Voice
   const currentVoice = HMONG_VOICE_PROFILES.find(v => v.id === selectedVoiceId) || HMONG_VOICE_PROFILES[0];
 
-  // Syllables or words for synchronized karaoke display
+  // Syllables or words for synchronized karaoke display with English-friendly respellings and IPA
   const displayTokens = useMemo(() => {
-    if (resolvedEngine === 'hmong_dsp') {
+    if (resolvedEngine !== 'web_speech') {
       const parsed = parseHmongText(text, dialect);
-      return parsed.map(p => ({
+      return parsed.map((p) => ({
         token: p.raw,
         clean: p.clean,
         isPunctuation: p.isPunctuation,
         tone: p.toneLetter,
+        englishRespelling: p.englishRespelling || p.clean,
+        ipa: p.ipa,
+        gloss: p.gloss,
+        isOverride: p.isOverride,
       }));
     } else {
       // English / Web Speech tokenization
-      return text.split(/\s+/).filter(Boolean).map(w => ({
+      return text.split(/\s+/).filter(Boolean).map((w) => ({
         token: w,
         clean: w.replace(/[^a-zA-Z]/g, ''),
         isPunctuation: false,
         tone: '',
+        englishRespelling: w,
+        ipa: '',
+        gloss: '',
+        isOverride: false,
       }));
     }
   }, [text, dialect, resolvedEngine]);
@@ -248,6 +419,7 @@ export default function App() {
       toneEmphasis,
       prosody,
       engineMode,
+      audioSource,
     });
 
     if (newTrack) {
@@ -276,6 +448,7 @@ export default function App() {
         pitch,
         toneEmphasis,
         prosody,
+        audioSource,
       });
       const wavBlob = hmongTTS.encodeWav(buffer);
       const url = URL.createObjectURL(wavBlob);
@@ -605,33 +778,83 @@ export default function App() {
                       <span className={`px-2 py-0.5 rounded text-[11px] font-mono font-medium ${
                         resolvedEngine === 'web_speech'
                           ? 'bg-sky-950 text-sky-300 border border-sky-800/40'
+                          : resolvedEngine === 'hmongdictionary_native'
+                          ? 'bg-emerald-950 text-emerald-300 border border-emerald-800/50 shadow-xs'
                           : 'bg-teal-950 text-teal-300 border border-teal-800/40'
                       }`}>
-                        {resolvedEngine === 'web_speech' ? 'Web Speech API' : 'Hmong LF Acoustic DSP'}
+                        {resolvedEngine === 'web_speech'
+                          ? 'Web Speech API'
+                          : resolvedEngine === 'hmongdictionary_native'
+                          ? '🎙️ HmongDictionary.com Native Voice'
+                          : 'Hmong LF Acoustic DSP'}
                       </span>
                     </div>
                   </div>
 
                   {/* Text Input Area */}
                   <div>
-                    <div className="flex items-center justify-between text-xs text-slate-400 mb-1.5">
-                      <label className="font-semibold text-slate-200 flex items-center gap-1.5">
-                        <span>Type Text On Top (Hmong RPA or English)</span>
-                      </label>
-                      <div className="flex items-center gap-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400 mb-1.5">
+                      <div className="flex items-center gap-2">
+                        <label className="font-semibold text-slate-200 flex items-center gap-1.5">
+                          <span>Type Text On Top (Hmong RPA or English)</span>
+                        </label>
+                      </div>
+
+                      <div className="flex items-center flex-wrap gap-2">
+                        {/* Quick Microphone Voice Input Dictation */}
+                        <button
+                          type="button"
+                          onClick={handleToggleVoiceInput}
+                          className={`px-2.5 py-1 rounded-lg text-xs font-semibold border transition flex items-center gap-1.5 active:scale-95 shadow-sm ${
+                            isVoiceInputActive
+                              ? 'bg-rose-950/90 border-rose-500 text-rose-300 ring-2 ring-rose-500/50 animate-pulse'
+                              : 'bg-slate-800/90 hover:bg-slate-700 text-slate-200 border-slate-700/80 hover:text-white'
+                          }`}
+                          title="Click to speak and input your voice directly into the text area"
+                        >
+                          <Mic className={`w-3.5 h-3.5 ${isVoiceInputActive ? 'text-rose-400 animate-ping' : 'text-teal-400'}`} />
+                          <span>{isVoiceInputActive ? 'Listening to voice...' : 'Input My Voice'}</span>
+                        </button>
+
+                        {/* Hmoob Phrasebook Button */}
+                        <button
+                          type="button"
+                          onClick={() => setIsPhrasebookOpen(true)}
+                          className="px-2.5 py-1 rounded-lg bg-emerald-950/70 hover:bg-emerald-900/90 text-emerald-300 border border-emerald-800/70 text-xs font-semibold transition active:scale-95 flex items-center gap-1.5 shadow-sm hover:text-white"
+                          title="Open Hmong Community Phrasebook (Greetings, Basics, Numbers, Food, Travel, Family)"
+                        >
+                          <BookOpen className="w-3.5 h-3.5 text-emerald-400" />
+                          <span>Phrasebook</span>
+                        </button>
+
+                        {/* Fix Word Pronunciation Button */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setFixModalWord('');
+                            setIsFixModalOpen(true);
+                          }}
+                          className="px-2.5 py-1 rounded-lg bg-amber-950/70 hover:bg-amber-900/90 text-amber-300 border border-amber-800/70 text-xs font-semibold transition active:scale-95 flex items-center gap-1.5 shadow-sm hover:text-white"
+                          title="Fix or override pronunciation for any word (English respelling, IPA, tones)"
+                        >
+                          <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                          <span>Fix Pronunciation</span>
+                        </button>
+
                         {text.length > 0 && (
                           <button
+                            type="button"
                             onClick={() => {
                               handleStop();
                               setText('');
                               studioPlayer.clearTrack();
                             }}
-                            className="text-xs text-slate-400 hover:text-rose-400 transition underline underline-offset-2"
+                            className="text-xs text-slate-400 hover:text-rose-400 transition underline underline-offset-2 ml-1"
                           >
                             Clear
                           </button>
                         )}
-                        <span className="font-mono">{text.length} characters</span>
+                        <span className="font-mono text-[11px] text-slate-500">{text.length} chars</span>
                       </div>
                     </div>
 
@@ -642,7 +865,7 @@ export default function App() {
                         studioPlayer.clearTrack();
                       }}
                       rows={4}
-                      placeholder="Type Hmong RPA or English sentence here (e.g. Nyob zoo sawv daws, Haus tshuaj no, or select a preset above)..."
+                      placeholder="Type Hmong RPA or English sentence here (e.g. Nyob zoo sawv daws, Haus tshuaj no, or select from the Phrasebook)..."
                       className="w-full p-3.5 bg-slate-950/90 border border-slate-800 rounded-xl text-slate-100 placeholder:text-slate-600 font-sans text-base focus:outline-hidden focus:border-teal-500 focus:ring-1 focus:ring-teal-500/30 transition resize-y min-h-[110px]"
                     />
                   </div>
@@ -672,9 +895,57 @@ export default function App() {
                             Word {(currentWordIdx ?? 0) + 1} of {displayTokens.length}
                           </span>
                         )}
+                        {showLiveReading && resolvedEngine === 'hmongdictionary_native' && (
+                          <span className="hidden sm:inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-300 bg-emerald-950/70 px-2 py-0.5 rounded border border-emerald-800/50" title="Pronunciation audio from HmongDictionary.com native voice archives">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                            <span>Native Voice Synced</span>
+                          </span>
+                        )}
                       </div>
 
                       <div className="flex items-center gap-2">
+                        {/* Word Display Mode: RPA / Respelling / IPA */}
+                        {showLiveReading && displayTokens.length > 0 && (
+                          <div className="flex items-center gap-1 bg-slate-900 p-0.5 rounded-lg border border-slate-800 text-[10px]" title="Change phonetic display mode for learners">
+                            <button
+                              type="button"
+                              onClick={() => setReadingDisplayMode('rpa')}
+                              className={`px-2 py-0.5 rounded font-semibold transition ${
+                                readingDisplayMode === 'rpa'
+                                  ? 'bg-amber-600 text-white shadow-xs'
+                                  : 'text-slate-400 hover:text-white'
+                              }`}
+                              title="Show standard Hmong RPA orthography"
+                            >
+                              RPA
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setReadingDisplayMode('respell')}
+                              className={`px-2 py-0.5 rounded font-semibold transition ${
+                                readingDisplayMode === 'respell'
+                                  ? 'bg-amber-600 text-white shadow-xs'
+                                  : 'text-slate-400 hover:text-white'
+                              }`}
+                              title="Show English-friendly phonetic respellings"
+                            >
+                              Respelling
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setReadingDisplayMode('ipa')}
+                              className={`px-2 py-0.5 rounded font-semibold transition ${
+                                readingDisplayMode === 'ipa'
+                                  ? 'bg-amber-600 text-white shadow-xs'
+                                  : 'text-slate-400 hover:text-white'
+                              }`}
+                              title="Show International Phonetic Alphabet (IPA)"
+                            >
+                              IPA
+                            </button>
+                          </div>
+                        )}
+
                         {/* 20 Words / Half Text / Full Text Window Mode Selector */}
                         {showLiveReading && displayTokens.length > 0 && (
                           <div className="flex items-center gap-1 bg-slate-900 p-0.5 rounded-lg border border-slate-800 text-[10px]">
@@ -763,6 +1034,29 @@ export default function App() {
                           </div>
                         )}
 
+                        {/* Highlight Colors Settings Toggle */}
+                        {showLiveReading && (
+                          <button
+                            onClick={() => setIsReadingColorSettingsOpen(!isReadingColorSettingsOpen)}
+                            className={`flex items-center gap-1.5 px-2.5 py-0.5 rounded text-[11px] font-sans font-medium transition border ${
+                              isReadingColorSettingsOpen
+                                ? 'bg-teal-950 border-teal-500 text-teal-300 ring-1 ring-teal-500/30'
+                                : 'bg-slate-900 border-slate-800 text-slate-300 hover:text-white hover:border-slate-700'
+                            }`}
+                            title="Customize spoken word highlight colors for Hmong and English modes"
+                          >
+                            <Palette className="w-3 h-3 text-teal-400" />
+                            <span>Colors</span>
+                            <span
+                              className="w-2 h-2 rounded-full border border-white/30"
+                              style={{
+                                backgroundColor: resolvedEngine === 'web_speech' ? englishHighlightColor : hmongHighlightColor,
+                              }}
+                              title={`Active mode color (${resolvedEngine === 'web_speech' ? 'English' : 'Hmong'})`}
+                            />
+                          </button>
+                        )}
+
                         {/* Hide/Show Live Reading Display */}
                         <button
                           onClick={() => setShowLiveReading(!showLiveReading)}
@@ -772,6 +1066,174 @@ export default function App() {
                         </button>
                       </div>
                     </div>
+
+                    {/* Live Reading Window Highlight Color Settings Panel */}
+                    {showLiveReading && isReadingColorSettingsOpen && (
+                      <div className="p-3 bg-slate-900/95 rounded-xl border border-slate-800/90 text-xs space-y-2.5 shadow-xl">
+                        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2">
+                          <div className="flex items-center gap-1.5">
+                            <Palette className="w-3.5 h-3.5 text-teal-400" />
+                            <span className="font-bold text-slate-200">Highlight Colors Settings</span>
+                            <span className="text-[10px] text-slate-400 font-mono">
+                              (Hmong vs English Spoken Word Highlighting)
+                            </span>
+                          </div>
+
+                          <button
+                            onClick={handleResetHighlightColors}
+                            className="text-[11px] text-slate-400 hover:text-rose-300 transition underline underline-offset-2 flex items-center gap-1"
+                            title="Reset Hmong and English highlight colors to defaults"
+                          >
+                            <RotateCcw className="w-3 h-3" />
+                            Reset Defaults
+                          </button>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          {/* Hmong Mode Highlight Color Customizer */}
+                          <div className={`p-2.5 rounded-lg border transition ${
+                            resolvedEngine !== 'web_speech'
+                              ? 'bg-slate-950/80 border-teal-600/70 ring-1 ring-teal-500/20'
+                              : 'bg-slate-950/50 border-slate-800/80'
+                          }`}>
+                            <div className="flex items-center justify-between mb-2">
+                              <div className="flex items-center gap-1.5 font-semibold text-slate-200">
+                                <Languages className="w-3.5 h-3.5 text-teal-400" />
+                                <span>Hmong Mode</span>
+                                {resolvedEngine !== 'web_speech' && (
+                                  <span className="text-[9px] font-bold uppercase tracking-wider bg-teal-950 text-teal-300 border border-teal-800/60 px-1.5 py-0.5 rounded">
+                                    Active Now
+                                  </span>
+                                )}
+                              </div>
+                              <span
+                                className="text-[11px] font-extrabold px-2 py-0.5 rounded shadow-sm transition"
+                                style={{
+                                  backgroundColor: hmongHighlightColor,
+                                  color: getContrastTextColor(hmongHighlightColor),
+                                  boxShadow: `0 4px 10px ${hmongHighlightColor}40`,
+                                }}
+                              >
+                                Nyob zoo
+                              </span>
+                            </div>
+
+                            <div className="space-y-1.5">
+                              <div className="flex items-center flex-wrap gap-1.5">
+                                {HMONG_HIGHLIGHT_PRESETS.map((p) => {
+                                  const isSelected = hmongHighlightColor.toLowerCase() === p.color.toLowerCase();
+                                  return (
+                                    <button
+                                      key={p.color}
+                                      onClick={() => handleUpdateHmongHighlight(p.color)}
+                                      className={`w-6 h-6 rounded-md transition-all hover:scale-110 flex items-center justify-center border ${
+                                        isSelected
+                                          ? 'border-white ring-2 ring-teal-400/50 scale-110'
+                                          : 'border-slate-700/60 hover:border-slate-500'
+                                      }`}
+                                      style={{ backgroundColor: p.color }}
+                                      title={p.name}
+                                    >
+                                      {isSelected && (
+                                        <Check className="w-3 h-3 stroke-[3]" style={{ color: getContrastTextColor(p.color) }} />
+                                      )}
+                                    </button>
+                                  );
+                                })}
+
+                                {/* Custom Color Input */}
+                                <label
+                                  className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-900 border border-slate-700 text-[10px] text-slate-300 cursor-pointer hover:border-teal-500/60 hover:text-white transition"
+                                  title="Pick custom Hmong highlight color"
+                                >
+                                  <input
+                                    type="color"
+                                    value={hmongHighlightColor}
+                                    onChange={(e) => handleUpdateHmongHighlight(e.target.value)}
+                                    className="w-3.5 h-3.5 rounded cursor-pointer border-0 bg-transparent p-0"
+                                  />
+                                  <span className="font-mono uppercase">{hmongHighlightColor}</span>
+                                </label>
+                              </div>
+                              <p className="text-[10px] text-slate-500 italic">
+                                Applied when playing Hmong RPA text (White Hmong & Green Hmong).
+                              </p>
+                            </div>
+                          </div>
+
+                          {/* English Mode Highlight Color Customizer */}
+                          <div className={`p-2.5 rounded-lg border transition ${
+                            resolvedEngine === 'web_speech'
+                              ? 'bg-slate-950/80 border-sky-600/70 ring-1 ring-sky-500/20'
+                              : 'bg-slate-950/50 border-slate-800/80'
+                          }`}>
+                            <div className="flex items-center justify-between mb-2">
+                              <div className="flex items-center gap-1.5 font-semibold text-slate-200">
+                                <Globe2 className="w-3.5 h-3.5 text-sky-400" />
+                                <span>English Mode</span>
+                                {resolvedEngine === 'web_speech' && (
+                                  <span className="text-[9px] font-bold uppercase tracking-wider bg-sky-950 text-sky-300 border border-sky-800/60 px-1.5 py-0.5 rounded">
+                                    Active Now
+                                  </span>
+                                )}
+                              </div>
+                              <span
+                                className="text-[11px] font-extrabold px-2 py-0.5 rounded shadow-sm transition"
+                                style={{
+                                  backgroundColor: englishHighlightColor,
+                                  color: getContrastTextColor(englishHighlightColor),
+                                  boxShadow: `0 4px 10px ${englishHighlightColor}40`,
+                                }}
+                              >
+                                Welcome
+                              </span>
+                            </div>
+
+                            <div className="space-y-1.5">
+                              <div className="flex items-center flex-wrap gap-1.5">
+                                {ENGLISH_HIGHLIGHT_PRESETS.map((p) => {
+                                  const isSelected = englishHighlightColor.toLowerCase() === p.color.toLowerCase();
+                                  return (
+                                    <button
+                                      key={p.color}
+                                      onClick={() => handleUpdateEnglishHighlight(p.color)}
+                                      className={`w-6 h-6 rounded-md transition-all hover:scale-110 flex items-center justify-center border ${
+                                        isSelected
+                                          ? 'border-white ring-2 ring-sky-400/50 scale-110'
+                                          : 'border-slate-700/60 hover:border-slate-500'
+                                      }`}
+                                      style={{ backgroundColor: p.color }}
+                                      title={p.name}
+                                    >
+                                      {isSelected && (
+                                        <Check className="w-3 h-3 stroke-[3]" style={{ color: getContrastTextColor(p.color) }} />
+                                      )}
+                                    </button>
+                                  );
+                                })}
+
+                                {/* Custom Color Input */}
+                                <label
+                                  className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-900 border border-slate-700 text-[10px] text-slate-300 cursor-pointer hover:border-sky-500/60 hover:text-white transition"
+                                  title="Pick custom English highlight color"
+                                >
+                                  <input
+                                    type="color"
+                                    value={englishHighlightColor}
+                                    onChange={(e) => handleUpdateEnglishHighlight(e.target.value)}
+                                    className="w-3.5 h-3.5 rounded cursor-pointer border-0 bg-transparent p-0"
+                                  />
+                                  <span className="font-mono uppercase">{englishHighlightColor}</span>
+                                </label>
+                              </div>
+                              <p className="text-[10px] text-slate-500 italic">
+                                Applied when playing English sentences via the Web Speech engine.
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
 
                     {showLiveReading && (
                       <div className="leading-relaxed text-lg flex flex-wrap gap-2 items-center min-h-[50px] pt-1">
@@ -799,21 +1261,58 @@ export default function App() {
                             const startIdx = readingWindowMode === 'full' ? 0 : currentChunk * chunkSize;
                             const endIdx = readingWindowMode === 'full' ? displayTokens.length : Math.min(displayTokens.length, startIdx + chunkSize);
 
+                            const isHmongMode = resolvedEngine !== 'web_speech';
+                            const activeWordHighlightColor = isHmongMode ? hmongHighlightColor : englishHighlightColor;
+                            const activeWordTextColor = getContrastTextColor(activeWordHighlightColor);
+
                             return displayTokens.slice(startIdx, endIdx).map((item, localIdx) => {
                               const actualIdx = startIdx + localIdx;
                               const isCurrent = currentWordIdx === actualIdx;
+                              const displayText =
+                                readingDisplayMode === 'respell' && !item.isPunctuation
+                                  ? (item.englishRespelling || item.token)
+                                  : readingDisplayMode === 'ipa' && !item.isPunctuation
+                                  ? (item.ipa || item.token)
+                                  : item.token;
+
                               return (
                                 <span
                                   key={actualIdx}
-                                  className={`rounded px-2.5 py-1 transition-all duration-150 ${
+                                  onClick={() => {
+                                    if (!item.isPunctuation && item.clean) {
+                                      setFixModalWord(item.clean);
+                                      setIsFixModalOpen(true);
+                                    }
+                                  }}
+                                  className={`rounded px-2.5 py-1 transition-all duration-150 inline-flex items-center gap-1 ${
+                                    item.isPunctuation ? '' : 'cursor-pointer hover:border-amber-500/80 hover:text-amber-200'
+                                  } ${
                                     isCurrent
-                                      ? resolvedEngine === 'web_speech'
-                                        ? 'bg-sky-500 text-slate-950 font-extrabold scale-110 shadow-lg shadow-sky-500/30'
-                                        : 'bg-teal-500 text-slate-950 font-extrabold scale-110 shadow-lg shadow-teal-500/30'
+                                      ? 'font-extrabold scale-110 shadow-lg ring-1 ring-white/30'
                                       : 'text-slate-300 bg-slate-900/60 border border-slate-800/80'
                                   }`}
+                                  style={
+                                    isCurrent
+                                      ? {
+                                          backgroundColor: activeWordHighlightColor,
+                                          color: activeWordTextColor,
+                                          boxShadow: `0 8px 18px -2px ${activeWordHighlightColor}55`,
+                                        }
+                                      : undefined
+                                  }
+                                  title={
+                                    item.isPunctuation
+                                      ? ''
+                                      : `Click to fix pronunciation for "${item.clean || item.token}" (IPA: ${item.ipa || '—'}, respelling: ${item.englishRespelling || '—'})`
+                                  }
                                 >
-                                  {item.token}
+                                  <span>{displayText}</span>
+                                  {item.isOverride && (
+                                    <span
+                                      className="w-1.5 h-1.5 rounded-full bg-amber-400"
+                                      title="Custom pronunciation override active"
+                                    />
+                                  )}
                                 </span>
                               );
                             });
@@ -939,6 +1438,80 @@ export default function App() {
 
               {/* Right Column: Voice & Acoustic Tuning Controls */}
               <div className="space-y-4">
+                {/* Voice Sound Source Card: HmongDictionary.com Native Voice vs Pure DSP */}
+                <div className={`p-4 rounded-2xl border ${currentTheme.border} ${currentTheme.surface} space-y-3 shadow-xl`}>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Volume2 className="w-4 h-4 text-emerald-400" />
+                      <h3 className="text-sm font-bold text-slate-200">Hmong Speech Sound Source</h3>
+                    </div>
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-950/80 text-emerald-300 border border-emerald-800/60 font-semibold flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                      Authentic Native
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setAudioSource('hmongdictionary_native')}
+                      className={`p-3 rounded-xl border text-left transition flex items-start justify-between gap-2.5 ${
+                        audioSource === 'hmongdictionary_native'
+                          ? 'bg-emerald-950/70 border-emerald-500 text-white shadow-lg ring-1 ring-emerald-500/40'
+                          : 'bg-slate-950/60 border-slate-800 text-slate-300 hover:border-slate-700'
+                      }`}
+                    >
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-bold text-white">🎙️ HmongDictionary.com Native Voice</span>
+                          {audioSource === 'hmongdictionary_native' && (
+                            <span className="text-[9px] font-bold uppercase bg-emerald-500 text-slate-950 px-1.5 py-0.5 rounded">
+                              Active
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-slate-400 leading-relaxed">
+                          Authentic recorded human voices from HmongDictionary.com with continuous whole-sentence reading, YouTube-style tonal cadence, and dedicated stops at periods.
+                        </p>
+                      </div>
+                      <div className={`w-4 h-4 rounded-full border mt-0.5 shrink-0 flex items-center justify-center ${
+                        audioSource === 'hmongdictionary_native' ? 'border-emerald-400 bg-emerald-400 text-slate-950' : 'border-slate-700'
+                      }`}>
+                        {audioSource === 'hmongdictionary_native' && <Check className="w-3 h-3 stroke-[3]" />}
+                      </div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setAudioSource('hmong_dsp')}
+                      className={`p-2.5 rounded-xl border text-left transition flex items-start justify-between gap-2.5 ${
+                        audioSource === 'hmong_dsp'
+                          ? 'bg-teal-950/70 border-teal-500 text-white shadow-lg ring-1 ring-teal-500/40'
+                          : 'bg-slate-950/60 border-slate-800 text-slate-300 hover:border-slate-700'
+                      }`}
+                    >
+                      <div className="space-y-0.5">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-semibold text-slate-200">⚡ Offline Formant Synthesizer</span>
+                          {audioSource === 'hmong_dsp' && (
+                            <span className="text-[9px] font-bold uppercase bg-teal-500 text-slate-950 px-1.5 py-0.5 rounded">
+                              Active
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-slate-400 leading-relaxed">
+                          Pure client-side acoustic DSP pipeline modeling glottal pulses and formant resonators.
+                        </p>
+                      </div>
+                      <div className={`w-4 h-4 rounded-full border mt-0.5 shrink-0 flex items-center justify-center ${
+                        audioSource === 'hmong_dsp' ? 'border-teal-400 bg-teal-400 text-slate-950' : 'border-slate-700'
+                      }`}>
+                        {audioSource === 'hmong_dsp' && <Check className="w-3 h-3 stroke-[3]" />}
+                      </div>
+                    </button>
+                  </div>
+                </div>
+
                 <div className={`p-5 rounded-2xl border ${currentTheme.border} ${currentTheme.surface} space-y-5 shadow-xl`}>
                   <div className="flex items-center justify-between relative">
                     <div className="flex items-center gap-2">
@@ -1191,6 +1764,29 @@ export default function App() {
         metadata={currentMetadata}
         isOpen={isMetadataModalOpen}
         onClose={() => setIsMetadataModalOpen(false)}
+      />
+
+      {/* Fix Pronunciation Modal */}
+      <FixPronunciationModal
+        isOpen={isFixModalOpen}
+        onClose={() => setIsFixModalOpen(false)}
+        targetWord={fixModalWord}
+        dialect={dialect}
+        onApplied={() => {
+          studioPlayer.clearTrack();
+        }}
+      />
+
+      {/* Hmong Community Phrasebook Drawer Modal */}
+      <PhrasebookDrawerModal
+        isOpen={isPhrasebookOpen}
+        onClose={() => setIsPhrasebookOpen(false)}
+        onSelectPhrase={(phrase) => {
+          setText(phrase);
+          studioPlayer.clearTrack();
+          setIsPhrasebookOpen(false);
+        }}
+        dialect={dialect}
       />
     </div>
   );

@@ -22,6 +22,7 @@ export interface VoiceRecording {
 
 export interface UseVoiceRecorderOptions {
   onTranscript?: (text: string) => void;
+  onRecordingComplete?: (recording: VoiceRecording) => void;
   enableDictation?: boolean;
 }
 
@@ -179,18 +180,24 @@ export function useVoiceRecorder(options: UseVoiceRecorderOptions = {}) {
         }
       };
 
+      const startTimestamp = Date.now();
+
       recorder.onstop = () => {
+        const measuredSec = Math.max(1, Math.round((Date.now() - startTimestamp) / 1000));
         const finalBlob = new Blob(audioChunksRef.current, {
           type: recorder.mimeType || 'audio/webm',
         });
         const url = URL.createObjectURL(finalBlob);
-        setRecording({
+        const newRec: VoiceRecording = {
           blob: finalBlob,
           url,
-          durationSec: recordingDuration || 1,
+          durationSec: measuredSec,
           mimeType: recorder.mimeType || 'audio/webm',
           timestamp: new Date(),
-        });
+        };
+        setRecording(newRec);
+        setRecordingDuration(measuredSec);
+        options.onRecordingComplete?.(newRec);
         stopTracks();
         if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
         setAudioLevel(0);
@@ -204,7 +211,6 @@ export function useVoiceRecorder(options: UseVoiceRecorderOptions = {}) {
       startLevelMeter(stream);
 
       // Start duration counter
-      const startTimestamp = Date.now();
       timerIntervalRef.current = window.setInterval(() => {
         const sec = Math.floor((Date.now() - startTimestamp) / 1000);
         setRecordingDuration(sec);
@@ -283,10 +289,31 @@ export function useVoiceRecorder(options: UseVoiceRecorderOptions = {}) {
     setIsPaused(false);
   }, []);
 
+function safelyTeardownAudioElement(audio: HTMLAudioElement | null) {
+  if (!audio) return;
+  try {
+    audio.pause();
+    audio.onplay = null;
+    audio.onpause = null;
+    audio.ontimeupdate = null;
+    audio.onended = null;
+    audio.onerror = null;
+    audio.oncanplay = null;
+    audio.onloadedmetadata = null;
+    audio.removeAttribute('src');
+    audio.load();
+  } catch {
+    // Ignore teardown errors
+  }
+}
+
   const playRecording = useCallback(() => {
     if (!recording) return;
 
-    if (!audioElementRef.current) {
+    if (!audioElementRef.current || audioElementRef.current.src !== recording.url) {
+      if (audioElementRef.current) {
+        safelyTeardownAudioElement(audioElementRef.current);
+      }
       const audio = new Audio(recording.url);
       audioElementRef.current = audio;
 
@@ -306,9 +333,12 @@ export function useVoiceRecorder(options: UseVoiceRecorderOptions = {}) {
         if (audio.duration) setRecordingCurrentTime(audio.duration);
       };
 
-      audio.onerror = (e) => {
-        console.error('Audio playback error:', e);
+      audio.onerror = () => {
+        if (!audio || audioElementRef.current !== audio || !audio.src) return;
+        const mediaErr = audio.error;
+        if (mediaErr && mediaErr.code === 1) return;
         setIsPlayingRecording(false);
+        console.warn('Recording playback status:', mediaErr ? `Code ${mediaErr.code}` : 'interrupted');
       };
     }
 
@@ -327,7 +357,9 @@ export function useVoiceRecorder(options: UseVoiceRecorderOptions = {}) {
           setIsRecordingEnded(false);
         })
         .catch((err) => {
-          console.error('Playback error:', err);
+          if (err && err.name !== 'AbortError') {
+            console.warn('Voice playback note:', err?.message || err);
+          }
           setIsPlayingRecording(false);
         });
     }
@@ -378,11 +410,13 @@ export function useVoiceRecorder(options: UseVoiceRecorderOptions = {}) {
 
   const clearRecording = useCallback(() => {
     if (audioElementRef.current) {
-      audioElementRef.current.pause();
+      safelyTeardownAudioElement(audioElementRef.current);
       audioElementRef.current = null;
     }
     if (recording?.url) {
-      URL.revokeObjectURL(recording.url);
+      try {
+        URL.revokeObjectURL(recording.url);
+      } catch (_) {}
     }
     setRecording(null);
     setRecordingDuration(0);
@@ -391,6 +425,15 @@ export function useVoiceRecorder(options: UseVoiceRecorderOptions = {}) {
     setIsRecordingEnded(false);
     setIsPlayingRecording(false);
   }, [recording]);
+
+  useEffect(() => {
+    return () => {
+      if (audioElementRef.current) {
+        safelyTeardownAudioElement(audioElementRef.current);
+        audioElementRef.current = null;
+      }
+    };
+  }, []);
 
   const downloadRecording = useCallback((filename = 'my_voice_recording') => {
     if (!recording) return;

@@ -49,7 +49,7 @@ interface AudioPlayerControllerProps {
   onRenderAndPlay?: () => void;
   hasText?: boolean;
   speakButtonLabel?: string;
-  engineType?: 'hmong_dsp' | 'web_speech';
+  engineType?: 'hmong_dsp' | 'web_speech' | 'hmongdictionary_native';
 }
 
 export const AudioPlayerController: React.FC<AudioPlayerControllerProps> = ({
@@ -76,7 +76,7 @@ export const AudioPlayerController: React.FC<AudioPlayerControllerProps> = ({
   onRenderAndPlay,
   hasText = true,
   speakButtonLabel,
-  engineType = 'hmong_dsp',
+  engineType = 'hmongdictionary_native',
 }) => {
   const progressBarRef = useRef<HTMLDivElement | null>(null);
 
@@ -147,10 +147,27 @@ export const AudioPlayerController: React.FC<AudioPlayerControllerProps> = ({
               )}
             </div>
 
-            <p className="text-[11px] text-slate-400 mt-0.5">
-              {track
-                ? `${track.dialect === 'dawb' ? 'White Hmong (Hmoob Dawb)' : 'Green Hmong (Moob Leeg)'} • ${track.voice.name}`
-                : 'Render or speak any sentence to activate full playback controls.'}
+            <p className="text-[11px] text-slate-400 mt-0.5 flex flex-wrap items-center gap-1.5">
+              {track ? (
+                <>
+                  <span>{track.dialect === 'dawb' ? 'White Hmong (Hmoob Dawb)' : 'Green Hmong (Moob Leeg)'}</span>
+                  <span>•</span>
+                  {track.engine === 'hmongdictionary_native' ? (
+                    <>
+                      <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-300 bg-emerald-950/60 px-1.5 py-0.5 rounded border border-emerald-800/40">
+                        🎙️ HmongDictionary.com Native Voice
+                      </span>
+                      <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-teal-300 bg-teal-950/60 px-1.5 py-0.5 rounded border border-teal-800/40" title="Whole-sentence natural reading flow with authentic tonal cadence and dedicated stop at period">
+                        ✨ Natural Sentence Cadence • Stop at Period
+                      </span>
+                    </>
+                  ) : (
+                    <span>{track.voice.name}</span>
+                  )}
+                </>
+              ) : (
+                'Render or speak any sentence with authentic Hmong native human pronunciation.'
+              )}
             </p>
           </div>
         </div>

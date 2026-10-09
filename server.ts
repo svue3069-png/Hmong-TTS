@@ -91,6 +91,193 @@ app.get('/api/voices', (_req: Request, res: Response) => {
   });
 });
 
+// Cache for native Hmong spoken audio MP3s from HmongDictionary.com
+const nativeAudioCache = new Map<string, Buffer>();
+const inFlightAudioRequests = new Map<string, Promise<Buffer | null>>();
+
+function getHmongCharCodes(str: string): string {
+  const upper = str.toUpperCase();
+  let codes = '';
+  for (let i = 0; i < upper.length; i++) {
+    codes += upper.charCodeAt(i).toString();
+  }
+  return codes;
+}
+
+async function fetchNativeAudioBuffer(cleanWord: string, retries = 1): Promise<Buffer | null> {
+  const key = cleanWord.toLowerCase().trim();
+  if (!key) return null;
+
+  if (nativeAudioCache.has(key)) {
+    return nativeAudioCache.get(key)!;
+  }
+
+  // De-duplicate parallel in-flight requests for the exact same word
+  if (inFlightAudioRequests.has(key)) {
+    return inFlightAudioRequests.get(key)!;
+  }
+
+  const fetchPromise = (async (): Promise<Buffer | null> => {
+    const charCodes = getHmongCharCodes(key);
+    if (!charCodes) return null;
+
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      let timeoutId: NodeJS.Timeout | null = null;
+      try {
+        const url = `https://www.hmongdictionary.com/suab/${charCodes}`;
+        const controller = new AbortController();
+        timeoutId = setTimeout(() => controller.abort(), 10000);
+
+        const resp = await fetch(url, {
+          signal: controller.signal,
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'audio/mpeg, audio/*;q=0.9, */*;q=0.8',
+            'Referer': 'https://www.hmongdictionary.com/mobile/',
+          },
+        });
+
+        if (resp.ok) {
+          const arrayBuf = await resp.arrayBuffer();
+          // Ensure valid audio buffer
+          if (arrayBuf.byteLength > 100) {
+            const buffer = Buffer.from(arrayBuf);
+            nativeAudioCache.set(key, buffer);
+            return buffer;
+          }
+        }
+      } catch (err: any) {
+        // If aborted or transient error and retries left, wait briefly and retry
+        if (attempt < retries) {
+          await new Promise((resolve) => setTimeout(resolve, 250));
+          continue;
+        }
+        // Graceful fallback to acoustic synthesis without throwing unhandled exceptions
+      } finally {
+        if (timeoutId) clearTimeout(timeoutId);
+      }
+    }
+
+    return null;
+  })();
+
+  inFlightAudioRequests.set(key, fetchPromise);
+  try {
+    return await fetchPromise;
+  } finally {
+    inFlightAudioRequests.delete(key);
+  }
+}
+
+// Background pre-warming of most essential Hmong words to make playback instantaneous
+const COMMON_PREWARM_WORDS = [
+  'nyob', 'zoo', 'sawv', 'daws', 'kuv', 'koj', 'peb', 'nej', 'siab', 'heev',
+  'tau', 'ntsib', 'hnub', 'no', 'ua', 'tsaug', 'yog', 'mas', 'ces', 'mus',
+  'tuaj', 'los', 'rau', 'cov', 'tus', 'lub', 'yam', 'txog', 'ntawm', 'suav',
+  'lawv', 'txaus', 'li', 'os', 'thov', 'nrog', 'txoj', 'kev', 'pab', 'zoo'
+];
+
+async function prewarmCommonAudio() {
+  for (const word of COMMON_PREWARM_WORDS) {
+    if (!nativeAudioCache.has(word)) {
+      try {
+        await fetchNativeAudioBuffer(word, 0);
+      } catch {
+        // ignore background pre-warm failures
+      }
+    }
+  }
+}
+
+// Pre-warm non-blockingly
+setTimeout(() => {
+  prewarmCommonAudio().catch(() => {});
+}, 1000);
+
+// Native Hmong Audio Proxy: Stream single word MP3
+app.get('/api/audio/hmong-word/:word', async (req: Request, res: Response) => {
+  try {
+    const rawWord = req.params.word || '';
+    const cleanWord = rawWord.replace(/[^a-zA-Z0-9]/g, '').trim();
+    if (!cleanWord) {
+      return res.status(400).json({ error: 'Invalid word parameter' });
+    }
+
+    const buffer = await fetchNativeAudioBuffer(cleanWord);
+    if (!buffer) {
+      return res.status(404).json({ error: 'Audio not found in native Hmong dictionary', word: cleanWord });
+    }
+
+    res.setHeader('Content-Type', 'audio/mpeg');
+    res.setHeader('Cache-Control', 'public, max-age=604800, immutable');
+    res.setHeader('Content-Length', buffer.length.toString());
+    return res.send(buffer);
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// Native Hmong Audio Batch Endpoint: Retrieve multiple word recordings with pool throttling
+app.post('/api/audio/hmong-batch', async (req: Request, res: Response) => {
+  try {
+    const { words } = req.body;
+    if (!Array.isArray(words) || words.length === 0) {
+      return res.status(400).json({ error: 'Field "words" must be a non-empty array' });
+    }
+
+    // Limit batch size to 100 words per call
+    const uniqueWords = Array.from(new Set(
+      words.map(w => (typeof w === 'string' ? w.replace(/[^a-zA-Z0-9]/g, '').trim().toLowerCase() : '')).filter(Boolean)
+    )).slice(0, 100);
+
+    const results: Record<string, { found: boolean; audioBase64?: string; byteLength?: number; source?: string }> = {};
+
+    // Process in controlled concurrency chunks of 5 words to prevent connection saturation
+    const CHUNK_SIZE = 5;
+    for (let i = 0; i < uniqueWords.length; i += CHUNK_SIZE) {
+      const chunk = uniqueWords.slice(i, i + CHUNK_SIZE);
+      await Promise.all(
+        chunk.map(async (word) => {
+          const buf = await fetchNativeAudioBuffer(word);
+          if (buf) {
+            results[word] = {
+              found: true,
+              audioBase64: buf.toString('base64'),
+              byteLength: buf.length,
+              source: 'HmongDictionary.com (Native Recorded Audio)',
+            };
+          } else {
+            results[word] = {
+              found: false,
+            };
+          }
+        })
+      );
+    }
+
+    return res.json({
+      status: 'success',
+      totalRequested: uniqueWords.length,
+      foundCount: Object.values(results).filter(r => r.found).length,
+      cachedTotal: nativeAudioCache.size,
+      results,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// Native Audio Status Endpoint
+app.get('/api/audio/status', (_req: Request, res: Response) => {
+  res.json({
+    engine: 'Hmong Native Speech Service',
+    provider: 'HmongDictionary.com Native Voice Repository & Hmong Voice Agent',
+    format: 'MPEG Layer-3 44.1kHz Monaural Native Human Speech',
+    cachedWordCount: nativeAudioCache.size,
+    status: 'online',
+  });
+});
+
 // Phonemize & linguistic tone analysis endpoint
 app.post('/api/tts/phonemize', (req: Request, res: Response) => {
   try {

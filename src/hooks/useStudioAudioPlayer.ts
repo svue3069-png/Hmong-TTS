@@ -18,7 +18,8 @@ export interface AudioTrackMetadata {
   id: string;
   text: string;
   dialect: HmongDialect;
-  engine: 'hmong_dsp' | 'web_speech';
+  engine: 'hmong_dsp' | 'web_speech' | 'hmongdictionary_native';
+  audioSource?: 'hmongdictionary_native' | 'hmong_dsp';
   voice: VoiceProfile;
   url: string;
   blob?: Blob;
@@ -114,10 +115,28 @@ export function useStudioAudioPlayer(options: UseStudioAudioPlayerOptions = {}) 
     animFrameRef.current = requestAnimationFrame(trackProgress);
   }, [updateKaraokeHighlight]);
 
+function safelyTeardownAudioElement(audio: HTMLAudioElement | null) {
+  if (!audio) return;
+  try {
+    audio.pause();
+    audio.onplay = null;
+    audio.onpause = null;
+    audio.ontimeupdate = null;
+    audio.onended = null;
+    audio.onerror = null;
+    audio.oncanplay = null;
+    audio.onloadedmetadata = null;
+    audio.removeAttribute('src');
+    audio.load();
+  } catch {
+    // Ignore teardown errors
+  }
+}
+
   // Setup HTMLAudioElement with event handlers
   const setupAudioElement = useCallback((url: string, targetTrack: AudioTrackMetadata) => {
     if (audioElementRef.current) {
-      audioElementRef.current.pause();
+      safelyTeardownAudioElement(audioElementRef.current);
       audioElementRef.current = null;
     }
 
@@ -142,7 +161,7 @@ export function useStudioAudioPlayer(options: UseStudioAudioPlayerOptions = {}) 
     };
 
     audio.ontimeupdate = () => {
-      if (audio) {
+      if (audio && audioElementRef.current === audio) {
         setCurrentTime(audio.currentTime);
         updateKaraokeHighlight(audio.currentTime, targetTrack);
       }
@@ -166,10 +185,22 @@ export function useStudioAudioPlayer(options: UseStudioAudioPlayerOptions = {}) 
       options.onWordHighlight?.(null);
     };
 
-    audio.onerror = (e) => {
-      console.error('Audio playback error:', e);
+    audio.onerror = () => {
+      // Ignore if this audio instance has been superseded or unloaded
+      if (!audio || audioElementRef.current !== audio || !audio.src) {
+        return;
+      }
+      const mediaErr = audio.error;
+      // MEDIA_ERR_ABORTED (code 1) is benign user interruption
+      if (mediaErr && mediaErr.code === 1) {
+        return;
+      }
       setIsPlaying(false);
       setIsPaused(false);
+      const detail = mediaErr
+        ? `Code ${mediaErr.code}: ${mediaErr.message || 'Media source error'}`
+        : 'Playback interrupted';
+      console.warn('Audio playback status:', detail);
     };
 
     return audio;
@@ -185,6 +216,7 @@ export function useStudioAudioPlayer(options: UseStudioAudioPlayerOptions = {}) 
       pitch?: number;
       toneEmphasis?: number;
       prosody?: number;
+      audioSource?: 'hmongdictionary_native' | 'hmong_dsp';
       engineMode?: 'auto' | 'hmong_dawb' | 'hmong_leeg' | 'english';
     } = {}
   ): Promise<AudioTrackMetadata | null> => {
@@ -202,16 +234,18 @@ export function useStudioAudioPlayer(options: UseStudioAudioPlayerOptions = {}) 
       const pitch = optionsConfig.pitch || 1.0;
       const toneEmphasis = optionsConfig.toneEmphasis || 1.0;
       const prosody = optionsConfig.prosody !== undefined ? optionsConfig.prosody : 1.0;
+      const audioSource = optionsConfig.audioSource || 'hmongdictionary_native';
 
       if (!isEnglish) {
-        // Synthesize via native Hmong DSP engine
-        const { buffer, syllables, alignment, totalDuration } =
+        // Synthesize via native Hmong speech (HmongDictionary.com authentic recorded voice)
+        const { buffer, alignment, totalDuration } =
           await hmongTTS.renderToAudioBuffer(text, dialect, {
             voice,
             rate,
             pitch,
             toneEmphasis,
             prosody,
+            audioSource,
           });
 
         const wavBlob = hmongTTS.encodeWav(buffer);
@@ -221,7 +255,8 @@ export function useStudioAudioPlayer(options: UseStudioAudioPlayerOptions = {}) 
           id: `track_${Date.now()}`,
           text,
           dialect,
-          engine: 'hmong_dsp',
+          engine: audioSource === 'hmongdictionary_native' ? 'hmongdictionary_native' : 'hmong_dsp',
+          audioSource,
           voice,
           url,
           blob: wavBlob,
@@ -441,8 +476,7 @@ export function useStudioAudioPlayer(options: UseStudioAudioPlayerOptions = {}) 
   // Clear track and reset player to blank
   const clearTrack = useCallback(() => {
     if (audioElementRef.current) {
-      audioElementRef.current.pause();
-      audioElementRef.current.src = '';
+      safelyTeardownAudioElement(audioElementRef.current);
       audioElementRef.current = null;
     }
     if (animFrameRef.current) {
@@ -463,6 +497,17 @@ export function useStudioAudioPlayer(options: UseStudioAudioPlayerOptions = {}) 
     setCurrentWordIdx(null);
     options.onWordHighlight?.(null);
   }, [track, options]);
+
+  // Teardown on unmount
+  useEffect(() => {
+    return () => {
+      if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+      if (audioElementRef.current) {
+        safelyTeardownAudioElement(audioElementRef.current);
+        audioElementRef.current = null;
+      }
+    };
+  }, []);
 
   return {
     track,

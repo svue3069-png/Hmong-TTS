@@ -20,6 +20,8 @@ export interface HmongToneInfo {
   audioEffect: 'flat_high' | 'falling_high' | 'rising_mid' | 'flat_mid' | 'flat_low' | 'falling_breathy' | 'low_creaky' | 'low_rising';
 }
 
+import { hmongPronunciationStore } from './hmongPronunciationOverrides';
+
 export interface SyllableDecomposition {
   raw: string;
   clean: string;
@@ -28,6 +30,9 @@ export interface SyllableDecomposition {
   toneLetter: string;
   tone: HmongToneInfo;
   ipa: string;
+  englishRespelling?: string;
+  gloss?: string;
+  isOverride?: boolean;
   formants: {
     f1: number;
     f2: number;
@@ -219,6 +224,41 @@ const ONSET_CONSONANTS_LEEG = [
 const VOWEL_KEYS = ['aaw', 'ai', 'au', 'aw', 'ee', 'oo', 'ia', 'ua', 'a', 'e', 'i', 'o', 'u', 'w'];
 const TONE_KEYS = ['b', 'j', 'v', 's', 'g', 'm', 'd'];
 
+export const ONSET_RESPELLING: Record<string, string> = {
+  nplh: 'umpl', ntsh: 'unch', ntxh: 'unts', nph: 'ump', npl: 'umpl',
+  nts: 'unts', ntx: 'unts', nth: 'unt', nkh: 'ungk', nch: 'unch',
+  nrh: 'untr', nqh: 'unk', plh: 'pl', txh: 'ts', tsh: 'ts',
+  ph: 'p', pl: 'pl', np: 'ump', th: 't', nt: 'unt',
+  dh: 'd', dl: 'dl', rh: 'tr', nr: 'untr', ch: 'ch',
+  nc: 'unj', nj: 'unj', kh: 'k', nk: 'ungk', qh: 'k',
+  nq: 'unk', nz: 'unzh', nx: 'uns', ns: 'unsh', hm: 'm',
+  hn: 'n', hl: 'l', xy: 'sh', tx: 'ts', ts: 'ts',
+  ny: 'ny', p: 'p', t: 't', d: 'd', b: 'b', c: 'ch',
+  k: 'k', q: 'k', f: 'f', v: 'v', x: 's', s: 'sh',
+  z: 'zh', h: 'h', l: 'l', m: 'm', n: 'n', r: 'tr',
+  y: 'y', w: 'w',
+  dlh: 'dl', ndl: 'undl', ndlh: 'undl',
+};
+
+export const RIME_RESPELLING: Record<string, string> = {
+  iai: 'ee-uh', uai: 'oo-uh', ia: 'ee-uh', ua: 'oo-uh',
+  ai: 'ye', au: 'ow', aw: 'uh', ee: 'ay', oo: 'aw',
+  aa: 'ah', a: 'ah', e: 'eh', i: 'ee', o: 'aw',
+  u: 'oo', w: 'uh',
+};
+
+/**
+ * Generates an English-friendly phonetic respelling that an English learner or standard generic TTS voice
+ * can read out reliably (modeled from Hmoob TTS Studio grapheme-to-phoneme engine).
+ */
+export function getHmongEnglishRespelling(text: string, dialect: HmongDialect = 'dawb'): string {
+  const syllables = parseHmongText(text, dialect);
+  return syllables
+    .map((s) => (s.isPunctuation ? s.raw : s.englishRespelling || s.clean))
+    .join(' ')
+    .replace(/\s+([.,!?;:])/g, '$1');
+}
+
 /**
  * Decomposes a single Hmong RPA token into onset, nucleus vowel, and tone.
  */
@@ -320,14 +360,30 @@ export function parseHmongSyllable(token: string, dialect: HmongDialect = 'dawb'
   const vowelIpa = formantInfo.ipa;
   const ipa = `[${onsetIpa}${vowelIpa}${toneInfo.ipaDiacritic}]`;
 
+  // Check pronunciation overrides
+  const override = hmongPronunciationStore.get(pureWord);
+
+  const onsetResp = ONSET_RESPELLING[identifiedOnset] || identifiedOnset;
+  const rimeResp = RIME_RESPELLING[vowel] || vowel;
+  const defaultRespelling = `${onsetResp}${rimeResp}`.trim();
+
+  const finalIpa = override?.ipa || ipa;
+  const finalRespelling = override?.respelling || defaultRespelling;
+  const finalToneInfo = (override?.toneLetter !== undefined && HMONG_TONES[override.toneLetter])
+    ? HMONG_TONES[override.toneLetter]
+    : toneInfo;
+
   return {
     raw: token,
     clean: pureWord,
     onset: identifiedOnset,
     vowel,
-    toneLetter,
-    tone: toneInfo,
-    ipa,
+    toneLetter: override?.toneLetter || toneLetter,
+    tone: finalToneInfo,
+    ipa: finalIpa,
+    englishRespelling: finalRespelling,
+    gloss: override?.gloss,
+    isOverride: Boolean(override),
     formants: {
       f1: formantInfo.f1Start,
       f2: formantInfo.f2Start,

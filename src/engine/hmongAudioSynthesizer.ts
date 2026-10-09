@@ -14,6 +14,7 @@ import {
   HMONG_VOWELS,
 } from './hmongPhonology';
 import { applyNativeProsody } from './nativePronunciation';
+import { assembleNativeHmongTrack } from './hmongNativeAudio';
 
 export interface SyllableAlignmentMetadata {
   index: number;
@@ -178,6 +179,7 @@ export interface SynthesisOptions {
   volume?: number; // 0.0 - 1.0
   toneEmphasis?: number; // 0.8 - 1.6
   prosody?: number; // 0.0 (rigid metronome) to 2.0 (expressive human rubato & pitch micro-variation)
+  audioSource?: 'hmongdictionary_native' | 'hmong_dsp';
   onStart?: () => void;
   onSyllable?: (index: number, syllable: SyllableDecomposition) => void;
   onEnd?: () => void;
@@ -275,6 +277,44 @@ export class HmongAcousticEngine {
       return opt;
     });
 
+    // 1. Primary Engine: Authentic Native Recorded Audio from HmongDictionary.com & Hmong Voice Archives
+    if (options.audioSource !== 'hmong_dsp') {
+      try {
+        const nativeResult = await assembleNativeHmongTrack(text, dialect, ctx, {
+          rate,
+          prosody,
+          fallbackSynthesizer: (syl, sr) => {
+            const tempBuffer = new Float32Array(Math.floor((sr * (syl.durationMs / 1000)) / rate));
+            this.synthesizeSyllableAudio(
+              tempBuffer,
+              0,
+              tempBuffer.length,
+              syl,
+              voice.baseF0 * pitch,
+              sr,
+              voice,
+              toneScale,
+              voice.vocalTractLength,
+              0,
+              prosody
+            );
+            return tempBuffer;
+          },
+        });
+
+        if (nativeResult.nativeCount > 0 || nativeResult.totalCount === 0) {
+          return {
+            buffer: nativeResult.buffer,
+            syllables,
+            alignment: nativeResult.alignment,
+            totalDuration: nativeResult.totalDuration,
+          };
+        }
+      } catch (nativeErr) {
+        console.warn('Native speech assembly note, using DSP fallback:', nativeErr);
+      }
+    }
+
     const sampleRate = ctx.sampleRate;
 
     // Calculate total duration in samples with dynamic prosody variations
@@ -294,7 +334,25 @@ export class HmongAcousticEngine {
       const nextSyl = syllables[i + 1];
       const isClauseBoundary = !nextSyl || nextSyl.isPunctuation;
 
-      let durationSec = syl.isPunctuation ? 0.20 : (syl.durationMs / 1000) / rate;
+      let durationSec = 0;
+      if (syl.isPunctuation) {
+        const punct = syl.raw;
+        let pauseSec = 0.34;
+        if (punct === '.' || punct === '。') {
+          pauseSec = 0.78; // STOP AT PERIOD
+        } else if (punct === '?' || punct === '？') {
+          pauseSec = 0.75; // QUESTION STOP
+        } else if (punct === '!' || punct === '！') {
+          pauseSec = 0.72; // EXCLAMATION STOP
+        } else if (punct === ',' || punct === ';' || punct === ':') {
+          pauseSec = 0.34;
+        } else if (punct === '-') {
+          pauseSec = 0.20;
+        }
+        durationSec = pauseSec / rate;
+      } else {
+        durationSec = (syl.durationMs / 1000) / rate;
+      }
       let pitchInflection = 0;
 
       if (!syl.isPunctuation) {
