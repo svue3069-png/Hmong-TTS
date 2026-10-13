@@ -540,7 +540,7 @@ export const VoiceRecorderCard: React.FC<VoiceRecorderCardProps> = ({
               const ratio = recording.durationSec / estNativeSec;
               const matchScore = Math.max(72, Math.min(98, Math.round(100 - Math.abs(ratio - 1) * 28)));
               return (
-                <span className="px-2 py-0.5 rounded-full text-[11px] font-mono font-bold bg-amber-950/80 text-amber-300 border border-amber-800/60">
+                <span className="px-2 py-0.5 rounded text-[11px] font-mono font-semibold bg-amber-950/80 text-amber-300 border border-amber-800/60">
                   {matchScore}% Rhythm & Tone Match
                 </span>
               );

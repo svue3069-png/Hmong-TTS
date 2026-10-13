@@ -13,6 +13,7 @@ import { hmongTTS, HMONG_VOICE_PROFILES, VoiceProfile } from '../engine/hmongAud
 import { HmongDialect, parseHmongText, SyllableDecomposition } from '../engine/hmongPhonology';
 import { detectLanguage, DetectionResult } from '../engine/languageDetector';
 import { webSpeech } from '../engine/webSpeechEngine';
+import { taskCoordinator } from '../engine/taskCoordinator';
 
 export interface AudioTrackMetadata {
   id: string;
@@ -63,12 +64,22 @@ export function useStudioAudioPlayer(options: UseStudioAudioPlayerOptions = {}) 
   isLoopingRef.current = isLooping;
   speedRef.current = playbackSpeed;
 
-  // Clean up on unmount
+  // Register with taskCoordinator to immediately stop on tab change or window blur
   useEffect(() => {
+    const unregister = taskCoordinator.registerStopHandler('studio_player', () => {
+      if (audioElementRef.current && !audioElementRef.current.paused) {
+        audioElementRef.current.pause();
+        setIsPlaying(false);
+        setIsPaused(true);
+        if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+      }
+    });
+
     return () => {
+      unregister();
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
       if (audioElementRef.current) {
-        audioElementRef.current.pause();
+        safelyTeardownAudioElement(audioElementRef.current);
         audioElementRef.current = null;
       }
     };
@@ -183,6 +194,7 @@ function safelyTeardownAudioElement(audio: HTMLAudioElement | null) {
       setCurrentTime(audio.duration || targetTrack.durationSec);
       setCurrentWordIdx(null);
       options.onWordHighlight?.(null);
+      taskCoordinator.notifyTaskEnded('studio_player');
     };
 
     audio.onerror = () => {
@@ -364,11 +376,13 @@ function safelyTeardownAudioElement(audio: HTMLAudioElement | null) {
 
     audio.playbackRate = speedRef.current;
     try {
+      taskCoordinator.notifyTaskStarted('studio_player');
       await audio.play();
       setIsPlaying(true);
       setIsPaused(false);
       setIsEnded(false);
     } catch (e) {
+      taskCoordinator.notifyTaskEnded('studio_player');
       console.warn('Playback error:', e);
     }
   }, [isEnded, track, setupAudioElement]);
@@ -380,8 +394,24 @@ function safelyTeardownAudioElement(audio: HTMLAudioElement | null) {
       setIsPlaying(false);
       setIsPaused(true);
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+      taskCoordinator.notifyTaskEnded('studio_player');
     }
   }, []);
+
+  // Stop playback completely and reset to 0:00
+  const stop = useCallback(() => {
+    if (audioElementRef.current) {
+      audioElementRef.current.pause();
+      audioElementRef.current.currentTime = 0;
+    }
+    setIsPlaying(false);
+    setIsPaused(false);
+    setCurrentTime(0);
+    setCurrentWordIdx(null);
+    options.onWordHighlight?.(null);
+    if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+    taskCoordinator.notifyTaskEnded('studio_player');
+  }, [options]);
 
   // Toggle Play / Pause
   const togglePlayPause = useCallback(() => {
@@ -407,10 +437,12 @@ function safelyTeardownAudioElement(audio: HTMLAudioElement | null) {
     audio.playbackRate = speedRef.current;
 
     try {
+      taskCoordinator.notifyTaskStarted('studio_player');
       await audio.play();
       setIsPlaying(true);
       setIsPaused(false);
     } catch (e) {
+      taskCoordinator.notifyTaskEnded('studio_player');
       console.warn('Relisten error:', e);
     }
   }, [track, setupAudioElement]);
@@ -524,6 +556,7 @@ function safelyTeardownAudioElement(audio: HTMLAudioElement | null) {
     loadTrack,
     play,
     pause,
+    stop,
     togglePlayPause,
     relisten,
     seek,

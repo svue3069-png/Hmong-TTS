@@ -49,6 +49,9 @@ export interface SyllableDecomposition {
   durationMs: number;
   pitchTrajectory: number[]; // F0 multiplier values across syllable duration
   isPunctuation?: boolean;
+  isToneSandhi?: boolean;
+  originalWord?: string;
+  sandhiShift?: string;
 }
 
 export interface VowelFormantProfile {
@@ -172,7 +175,8 @@ export const HMONG_VOWELS: Record<string, VowelFormantProfile> = {
   au: { f1Start: 820, f2Start: 1250, f3Start: 2600, f1End: 340, f2End: 850, f3End: 2350, ipa: 'au', isDiphthong: true, isNasal: false },
   aw: { f1Start: 780, f2Start: 1250, f3Start: 2600, f1End: 340, f2End: 1420, f3End: 2380, ipa: 'aɨ', isDiphthong: true, isNasal: false },
   
-  // Nasalized Vowels
+  // Nasalized Vowels (White & Green Hmong)
+  aa: { f1Start: 820, f2Start: 1280, f3Start: 2550, f1End: 800, f2End: 1350, f3End: 2500, ipa: 'ãŋ', isDiphthong: false, isNasal: true }, // Moob Leeg unique nasalized low vowel
   ee: { f1Start: 500, f2Start: 1850, f3Start: 2650, f1End: 420, f2End: 2100, f3End: 2600, ipa: 'ẽŋ', isDiphthong: false, isNasal: true },
   oo: { f1Start: 480, f2Start: 950, f3Start: 2350, f1End: 380, f2End: 1050, f3End: 2300, ipa: 'õŋ', isDiphthong: false, isNasal: true },
 };
@@ -221,7 +225,7 @@ const ONSET_CONSONANTS_LEEG = [
   'c', 'd', 'f', 'h', 'k', 'l', 'm', 'n', 'p', 'q', 'r', 's', 't', 'v', 'x', 'y', 'z', ''
 ];
 
-const VOWEL_KEYS = ['aaw', 'ai', 'au', 'aw', 'ee', 'oo', 'ia', 'ua', 'a', 'e', 'i', 'o', 'u', 'w'];
+const VOWEL_KEYS = ['aaw', 'ai', 'au', 'aw', 'aa', 'ee', 'oo', 'ia', 'ua', 'a', 'e', 'i', 'o', 'u', 'w'];
 const TONE_KEYS = ['b', 'j', 'v', 's', 'g', 'm', 'd'];
 
 export const ONSET_RESPELLING: Record<string, string> = {
@@ -398,7 +402,7 @@ export function parseHmongSyllable(token: string, dialect: HmongDialect = 'dawb'
       isNasal: formantInfo.isNasal,
     },
     durationMs,
-    pitchTrajectory: toneInfo.contour,
+    pitchTrajectory: finalToneInfo.contour,
     isPunctuation: false,
   };
 }
@@ -477,8 +481,44 @@ export function getOnsetIpa(onset: string, dialect: HmongDialect): string {
   return map[onset] || onset;
 }
 
+// High-frequency White & Green Hmong Tone Sandhi Lexical Dictionary
+// Grounded in acoustic phonetic field studies (Mottahedin, Ratliff, Lyman).
+// When preceded by high -b (55) or high-falling -j (52) triggers (e.g. ib, ob, peb, plaub, tsib, ntau, txhua):
+export const HMONG_SANDHI_PAIRS: Record<string, string> = {
+  // Low-flat -s [22] -> Breathy-falling -g [42̤]
+  tus: 'tug',
+  tas: 'tag',
+  // High-level -b [55] -> Breathy-falling -g [42̤]
+  lub: 'lug',
+  rab: 'rag',
+  khob: 'khog',
+  pob: 'pog',
+  tub: 'tug',
+  // High-level -b [55] -> Mid-rising -v [24]
+  hnub: 'hnuv',
+  // Creaky low-falling -m [21ˀ] -> Mid-rising -v [24]
+  daim: 'daiv',
+  chim: 'chiv',
+  kam: 'kav',
+  // High-falling -j [52] -> Breathy-falling -g [42̤]
+  leej: 'leeg',
+  // Unmarked mid [33] -> Circumflex low-rising -d [213] / -s [22]
+  phau: 'phaud',
+  xyoo: 'xyoos',
+  pluag: 'pluad',
+  chaw: 'chav',
+  ko: 'kod',
+};
+
+// Recognized trigger words for tone sandhi:
+// Numerals with -b/-j: ib (1), ob (2), peb (3), plaub (4), tsib (5)
+// Quantifiers/modifiers: ntau (many), txhua (every), lwm (other), puas (interrogative), tsis (negative)
+export const HMONG_SANDHI_TRIGGERS = new Set([
+  'ib', 'ob', 'peb', 'plaub', 'tsib', 'ntau', 'txhua', 'lwm', 'puas', 'tsis'
+]);
+
 /**
- * Parses full Hmong sentences into structured syllables with tone sandhi rules applied.
+ * Parses full Hmong sentences into structured syllables with authentic tone sandhi applied.
  */
 export function parseHmongText(text: string, dialect: HmongDialect = 'dawb'): SyllableDecomposition[] {
   // Normalize whitespace
@@ -489,16 +529,43 @@ export function parseHmongText(text: string, dialect: HmongDialect = 'dawb'): Sy
     const token = tokens[i];
     const syllable = parseHmongSyllable(token, dialect);
 
-    // Apply Hmong Tone Sandhi:
-    // If previous word had -b (55) or -j (52) tone, and current word has unmarked mid (33) or -s (22),
-    // then current word shifts to -g or -d in certain grammatical compounds.
+    // Apply Authentic Hmong Tone Sandhi:
+    // If previous word is a numeral/quantifier trigger OR ends in -b (55) or -j (52),
+    // and current word is a classifier or sandhi compound target:
     if (i > 0 && !syllable.isPunctuation && !results[i - 1].isPunctuation) {
       const prev = results[i - 1];
-      if ((prev.toneLetter === 'b' || prev.toneLetter === 'j') && (syllable.toneLetter === '' || syllable.toneLetter === 's')) {
-        // Subtle Sandhi pitch adjustment for natural fluency
-        if (syllable.toneLetter === '') {
-          // Slight inflection lift
-          syllable.pitchTrajectory = [0.68, 0.64, 0.55, 0.42];
+      const prevClean = prev.clean.toLowerCase();
+      const curClean = syllable.clean.toLowerCase();
+
+      const isSandhiTrigger =
+        HMONG_SANDHI_TRIGGERS.has(prevClean) ||
+        prev.toneLetter === 'b' ||
+        prev.toneLetter === 'j';
+
+      if (isSandhiTrigger && HMONG_SANDHI_PAIRS[curClean]) {
+        const sandhiWord = HMONG_SANDHI_PAIRS[curClean];
+        // Parse the target word in its true sandhi form so acoustics, breathiness, and pitch contour match
+        const sandhiParsed = parseHmongSyllable(sandhiWord, dialect);
+        sandhiParsed.raw = token; // Preserve the original token text for reading display
+        sandhiParsed.isToneSandhi = true;
+        sandhiParsed.originalWord = curClean;
+        sandhiParsed.sandhiShift = `${curClean} ➔ ${sandhiWord}`;
+        results.push(sandhiParsed);
+        continue;
+      } else if (isSandhiTrigger && (prev.toneLetter === 'b' || prev.toneLetter === 'j')) {
+        // General classifier sandhi shift for -s ending words (shift to breathy -g)
+        if (syllable.toneLetter === 's' && syllable.clean.length <= 4 && !syllable.isOverride) {
+          const candidate = syllable.clean.slice(0, -1) + 'g';
+          const sandhiParsed = parseHmongSyllable(candidate, dialect);
+          sandhiParsed.raw = token;
+          sandhiParsed.isToneSandhi = true;
+          sandhiParsed.originalWord = curClean;
+          sandhiParsed.sandhiShift = `${curClean} ➔ ${candidate}`;
+          results.push(sandhiParsed);
+          continue;
+        } else if (syllable.toneLetter === '') {
+          // Subtle inflection lift for unmarked mid tones in connected compounds
+          syllable.pitchTrajectory = [0.66, 0.62, 0.54, 0.44];
         }
       }
     }

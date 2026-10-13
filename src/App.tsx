@@ -22,6 +22,7 @@ import {
 import { detectLanguage, DetectionResult } from './engine/languageDetector';
 import { speechCoordinator, SpeechEngineMode, ActiveEngineType } from './engine/multilingualCoordinator';
 import { webSpeech } from './engine/webSpeechEngine';
+import { taskCoordinator } from './engine/taskCoordinator';
 import { AudioVisualizer } from './components/AudioVisualizer';
 import { PWAInstallButton } from './components/PWAInstallButton';
 import { ToneLaboratory } from './components/ToneLaboratory';
@@ -77,6 +78,22 @@ const PRESET_PHRASES = [
     leeg: 'Ua tsaug ntau ntau rua mej txuj kev paab cuam.',
     english: 'Thank you very much for your helpful assistance.',
     text: 'Ua tsaug ntau ntau rau nej txoj kev pab cuam.',
+  },
+  {
+    label: 'Hmong New Year (Noj Peb Caug)',
+    category: 'hmong',
+    dawb: 'Zoo siab tos txais nej sawv daws tuaj koom peb lub tsiab peb caug!',
+    leeg: 'Zoo sab txais mej suav daws tuaj koom peb lub tsiab peb caug!',
+    english: 'Welcome everyone to celebrate our Hmong New Year!',
+    text: 'Zoo siab tos txais nej sawv daws tuaj koom peb lub tsiab peb caug!',
+  },
+  {
+    label: 'Doctor Visit (Mus Saib Mob)',
+    category: 'hmong',
+    dawb: 'Kuv tuaj ntsib kws kho mob vim kuv lub taub hau mob heev.',
+    leeg: 'Kuv tuaj ntsib kws kho mob vim kuv lub taub hau mob heev.',
+    english: 'I came to see the doctor because I have a severe headache.',
+    text: 'Kuv tuaj ntsib kws kho mob vim kuv lub taub hau mob heev.',
   },
   {
     label: 'English Welcome',
@@ -261,6 +278,25 @@ export default function App() {
   const [isVoiceInputActive, setIsVoiceInputActive] = useState(false);
   const recognitionRef = React.useRef<any>(null);
 
+  // Stop all active tasks, audio playback, and background processes immediately whenever activeTab changes
+  useEffect(() => {
+    taskCoordinator.stopAll('tab_changed');
+    setCurrentWordIdx(null);
+  }, [activeTab]);
+
+  // Register voice dictation with taskCoordinator so it stops when tab/window switches
+  useEffect(() => {
+    const unregister = taskCoordinator.registerStopHandler('voice_dictation', () => {
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.stop();
+        } catch (_) {}
+      }
+      setIsVoiceInputActive(false);
+    });
+    return () => unregister();
+  }, []);
+
   const handleToggleVoiceInput = () => {
     if (isVoiceInputActive) {
       if (recognitionRef.current) {
@@ -269,8 +305,12 @@ export default function App() {
         } catch (_) {}
       }
       setIsVoiceInputActive(false);
+      taskCoordinator.notifyTaskEnded('voice_dictation');
       return;
     }
+
+    // Stop any playing audio before dictation starts
+    taskCoordinator.stopAll('new_task_started');
 
     const SpeechRec = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (SpeechRec) {
@@ -369,6 +409,8 @@ export default function App() {
         ipa: p.ipa,
         gloss: p.gloss,
         isOverride: p.isOverride,
+        isToneSandhi: p.isToneSandhi,
+        sandhiShift: p.sandhiShift,
       }));
     } else {
       // English / Web Speech tokenization
@@ -381,12 +423,15 @@ export default function App() {
         ipa: '',
         gloss: '',
         isOverride: false,
+        isToneSandhi: false,
+        sandhiShift: undefined,
       }));
     }
   }, [text, dialect, resolvedEngine]);
 
   // Dialect toggle handler
   const handleDialectChange = (newDialect: HmongDialect) => {
+    taskCoordinator.stopAll('dialect_changed');
     setDialect(newDialect);
     if (engineMode !== 'english') {
       const converted = convertDialectText(text, dialect, newDialect);
@@ -428,8 +473,8 @@ export default function App() {
   };
 
   const handleStop = () => {
-    studioPlayer.pause();
-    studioPlayer.seek(0);
+    taskCoordinator.stopAll('user_stopped');
+    studioPlayer.stop();
     setCurrentWordIdx(null);
   };
 
@@ -491,6 +536,7 @@ export default function App() {
 
   const handleOpenMetadataInspector = async () => {
     if (!text.trim()) return;
+    taskCoordinator.stopAll('modal_opened');
     try {
       const meta = await hmongTTS.generateMetadata(text, dialect, {
         voice: currentVoice,
@@ -536,61 +582,73 @@ export default function App() {
       )}
 
       {/* Top Bar Contract (Strict 3-zone architecture) */}
-      <header className={`border-b ${currentTheme.border} bg-slate-950/80 backdrop-blur-md sticky top-0 z-40 px-4 lg:px-8 py-3.5`}>
-        <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
+      <header className={`border-b ${currentTheme.border} bg-slate-950/85 backdrop-blur-md sticky top-0 z-40 px-4 lg:px-8 py-3`}>
+        <div className="max-w-7xl mx-auto flex items-center justify-between gap-8">
           {/* Zone 1: Single text wordmark in display face */}
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-2.5 shrink-0">
             <div className="w-8 h-8 rounded-lg bg-teal-500/10 border border-teal-500/30 flex items-center justify-center text-teal-400">
               <Languages className="w-4 h-4" />
             </div>
-            <a href="/" className="text-xl font-bold font-['Syne',sans-serif] tracking-tight text-white hover:text-teal-300 transition">
+            <a href="/" className="text-xl font-bold font-['Syne',sans-serif] tracking-tight text-white hover:text-teal-300 transition whitespace-nowrap">
               HmongTTS
             </a>
           </div>
 
-          {/* Zone 2: Clean text navigation links */}
+          {/* Zone 2: Clean single-line text navigation links */}
           <nav className="hidden lg:flex items-center gap-6 text-sm font-medium text-slate-400">
             <button
               onClick={() => setActiveTab('studio')}
-              className={`hover:text-white transition-colors cursor-pointer ${activeTab === 'studio' ? 'text-teal-400 font-semibold' : ''}`}
+              className={`hover:text-white transition-colors cursor-pointer whitespace-nowrap shrink-0 ${activeTab === 'studio' ? 'text-teal-400 font-semibold' : ''}`}
             >
               Studio Synthesizer
             </button>
             <button
               onClick={() => setActiveTab('tones')}
-              className={`hover:text-white transition-colors cursor-pointer ${activeTab === 'tones' ? 'text-teal-400 font-semibold' : ''}`}
+              className={`hover:text-white transition-colors cursor-pointer whitespace-nowrap shrink-0 ${activeTab === 'tones' ? 'text-teal-400 font-semibold' : ''}`}
             >
               Tone Lab
             </button>
             <button
               onClick={() => setActiveTab('references')}
-              className={`hover:text-white transition-colors cursor-pointer flex items-center gap-1.5 ${activeTab === 'references' ? 'text-teal-400 font-semibold' : ''}`}
+              className={`hover:text-white transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${activeTab === 'references' ? 'text-teal-400 font-semibold' : ''}`}
             >
               <Video className="w-3.5 h-3.5" />
               <span>Video & Media Player</span>
             </button>
             <button
               onClick={() => setActiveTab('sdk')}
-              className={`hover:text-white transition-colors cursor-pointer ${activeTab === 'sdk' ? 'text-teal-400 font-semibold' : ''}`}
+              className={`hover:text-white transition-colors cursor-pointer whitespace-nowrap shrink-0 ${activeTab === 'sdk' ? 'text-teal-400 font-semibold' : ''}`}
             >
               Developer SDK & APIs
             </button>
             <button
               onClick={() => setActiveTab('offline')}
-              className={`hover:text-white transition-colors cursor-pointer ${activeTab === 'offline' ? 'text-teal-400 font-semibold' : ''}`}
+              className={`hover:text-white transition-colors cursor-pointer whitespace-nowrap shrink-0 ${activeTab === 'offline' ? 'text-teal-400 font-semibold' : ''}`}
             >
               Offline Models
             </button>
             <button
               onClick={() => setActiveTab('accessibility')}
-              className={`hover:text-white transition-colors cursor-pointer ${activeTab === 'accessibility' ? 'text-teal-400 font-semibold' : ''}`}
+              className={`hover:text-white transition-colors cursor-pointer whitespace-nowrap shrink-0 ${activeTab === 'accessibility' ? 'text-teal-400 font-semibold' : ''}`}
             >
               Screen Reader
             </button>
           </nav>
 
           {/* Zone 3: Primary action button, Theme Selector & PWA Install */}
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 shrink-0">
+            <button
+              onClick={() => {
+                taskCoordinator.stopAll('modal_opened');
+                setIsPhrasebookOpen(true);
+              }}
+              className="px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white transition-colors flex items-center gap-1.5 shadow-sm whitespace-nowrap shrink-0 cursor-pointer"
+              title="Open Hmong Community Phrasebook"
+            >
+              <BookOpen className="w-3.5 h-3.5" />
+              <span>Phrasebook</span>
+            </button>
+
             {/* Multiple Color Background in One Label with Live Hover Preview & Custom Upload */}
             <ThemeColorBackgroundPicker
               currentBg={bgConfig}
@@ -666,7 +724,7 @@ export default function App() {
               {/* Mode Selector Segmented Control */}
               <div className="flex items-center gap-1 p-1 bg-slate-900/80 border border-slate-800 rounded-xl shrink-0 overflow-x-auto">
                 <button
-                  onClick={() => setEngineMode('auto')}
+                  onClick={() => { taskCoordinator.stopAll('mode_changed'); setEngineMode('auto'); }}
                   className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
                     engineMode === 'auto'
                       ? 'bg-teal-600 text-white shadow-sm'
@@ -678,7 +736,7 @@ export default function App() {
                   <span>Auto-Detect</span>
                 </button>
                 <button
-                  onClick={() => { setEngineMode('hmong_dawb'); setDialect('dawb'); }}
+                  onClick={() => { taskCoordinator.stopAll('mode_changed'); setEngineMode('hmong_dawb'); setDialect('dawb'); }}
                   className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
                     engineMode === 'hmong_dawb'
                       ? 'bg-teal-600 text-white shadow-sm'
@@ -688,7 +746,7 @@ export default function App() {
                   Hmoob Dawb
                 </button>
                 <button
-                  onClick={() => { setEngineMode('hmong_leeg'); setDialect('leeg'); }}
+                  onClick={() => { taskCoordinator.stopAll('mode_changed'); setEngineMode('hmong_leeg'); setDialect('leeg'); }}
                   className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
                     engineMode === 'hmong_leeg'
                       ? 'bg-teal-600 text-white shadow-sm'
@@ -698,7 +756,7 @@ export default function App() {
                   Moob Leeg
                 </button>
                 <button
-                  onClick={() => setEngineMode('english')}
+                  onClick={() => { taskCoordinator.stopAll('mode_changed'); setEngineMode('english'); }}
                   className={`flex items-center gap-1 px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
                     engineMode === 'english'
                       ? 'bg-sky-600 text-white shadow-sm'
@@ -710,7 +768,7 @@ export default function App() {
                 </button>
 
                 <button
-                  onClick={() => setActiveTab('references')}
+                  onClick={() => { taskCoordinator.stopAll('tab_changed'); setActiveTab('references'); }}
                   className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-teal-950/80 hover:bg-teal-900 border border-teal-800/60 text-teal-300 transition"
                   title="Open Video Studio to input video URL or upload video file"
                 >
@@ -727,6 +785,7 @@ export default function App() {
                 <button
                   key={idx}
                   onClick={() => {
+                    taskCoordinator.stopAll('preset_changed');
                     handleStop();
                     if (preset.category === 'hmong') {
                       setText(dialect === 'dawb' ? preset.dawb! : preset.leeg!);
@@ -819,7 +878,10 @@ export default function App() {
                         {/* Hmoob Phrasebook Button */}
                         <button
                           type="button"
-                          onClick={() => setIsPhrasebookOpen(true)}
+                          onClick={() => {
+                            taskCoordinator.stopAll('modal_opened');
+                            setIsPhrasebookOpen(true);
+                          }}
                           className="px-2.5 py-1 rounded-lg bg-emerald-950/70 hover:bg-emerald-900/90 text-emerald-300 border border-emerald-800/70 text-xs font-semibold transition active:scale-95 flex items-center gap-1.5 shadow-sm hover:text-white"
                           title="Open Hmong Community Phrasebook (Greetings, Basics, Numbers, Food, Travel, Family)"
                         >
@@ -831,6 +893,7 @@ export default function App() {
                         <button
                           type="button"
                           onClick={() => {
+                            taskCoordinator.stopAll('modal_opened');
                             setFixModalWord('');
                             setIsFixModalOpen(true);
                           }}
@@ -891,14 +954,13 @@ export default function App() {
                       <div className="flex items-center gap-2">
                         <span>Live Reading Window</span>
                         {displayTokens.length > 0 && showLiveReading && (
-                          <span className="text-teal-400 bg-teal-950/60 px-2 py-0.5 rounded border border-teal-800/40">
-                            Word {(currentWordIdx ?? 0) + 1} of {displayTokens.length}
+                          <span className="text-teal-400 font-mono tabular-nums text-xs">
+                            · Word {(currentWordIdx ?? 0) + 1} of {displayTokens.length}
                           </span>
                         )}
                         {showLiveReading && resolvedEngine === 'hmongdictionary_native' && (
-                          <span className="hidden sm:inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-300 bg-emerald-950/70 px-2 py-0.5 rounded border border-emerald-800/50" title="Pronunciation audio from HmongDictionary.com native voice archives">
-                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                            <span>Native Voice Synced</span>
+                          <span className="hidden sm:inline text-xs text-emerald-400/90 font-medium">
+                            · Native Voice Synced
                           </span>
                         )}
                       </div>
@@ -1280,6 +1342,7 @@ export default function App() {
                                   key={actualIdx}
                                   onClick={() => {
                                     if (!item.isPunctuation && item.clean) {
+                                      taskCoordinator.stopAll('modal_opened');
                                       setFixModalWord(item.clean);
                                       setIsFixModalOpen(true);
                                     }
@@ -1307,6 +1370,14 @@ export default function App() {
                                   }
                                 >
                                   <span>{displayText}</span>
+                                  {item.isToneSandhi && (
+                                    <span
+                                      className="text-[9px] px-1 py-0.2 rounded font-mono font-bold bg-teal-950/80 text-teal-300 border border-teal-700/60"
+                                      title={`Tone Sandhi applied: ${item.sandhiShift || ''}`}
+                                    >
+                                      Sandhi
+                                    </span>
+                                  )}
                                   {item.isOverride && (
                                     <span
                                       className="w-1.5 h-1.5 rounded-full bg-amber-400"
@@ -1445,8 +1516,7 @@ export default function App() {
                       <Volume2 className="w-4 h-4 text-emerald-400" />
                       <h3 className="text-sm font-bold text-slate-200">Hmong Speech Sound Source</h3>
                     </div>
-                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-950/80 text-emerald-300 border border-emerald-800/60 font-semibold flex items-center gap-1">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                    <span className="text-xs text-emerald-400 font-medium">
                       Authentic Native
                     </span>
                   </div>
@@ -1726,6 +1796,9 @@ export default function App() {
             onUseTranscript={(newText) => {
               setText(newText);
               setActiveTab('studio');
+            }}
+            onNavigateToToneLab={() => {
+              setActiveTab('tones');
             }}
             dialect={dialect}
           />

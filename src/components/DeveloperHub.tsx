@@ -4,6 +4,7 @@ import { Copy, Check, Terminal, Smartphone, Code2, Globe, Send, Play, Download, 
 import { HmongTTSClient } from '../sdk/HmongTTSClient';
 import { HmongDialect } from '../engine/hmongPhonology';
 import { BatchProcessingTab } from './BatchProcessingTab';
+import { taskCoordinator } from '../engine/taskCoordinator';
 
 export const DeveloperHub: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'javascript' | 'reactNative' | 'flutter' | 'restApi' | 'batch'>('javascript');
@@ -52,9 +53,12 @@ export const DeveloperHub: React.FC = () => {
       });
 
       // Play sound
+      taskCoordinator.notifyTaskStarted('dev_sandbox');
       await client.speak(sandboxText);
+      taskCoordinator.notifyTaskEnded('dev_sandbox');
     } catch (e) {
       console.error(e);
+      taskCoordinator.notifyTaskEnded('dev_sandbox');
     } finally {
       setIsSynthesizing(false);
     }
@@ -75,7 +79,7 @@ export const DeveloperHub: React.FC = () => {
       {/* Tabs */}
       <div className="flex flex-wrap gap-2 p-1.5 bg-slate-900 border border-slate-800 rounded-xl">
         <button
-          onClick={() => setActiveTab('javascript')}
+          onClick={() => { taskCoordinator.stopAll('tab_changed'); setActiveTab('javascript'); }}
           className={`flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg transition ${
             activeTab === 'javascript'
               ? 'bg-teal-600 text-white shadow-sm'
@@ -87,7 +91,7 @@ export const DeveloperHub: React.FC = () => {
         </button>
 
         <button
-          onClick={() => setActiveTab('reactNative')}
+          onClick={() => { taskCoordinator.stopAll('tab_changed'); setActiveTab('reactNative'); }}
           className={`flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg transition ${
             activeTab === 'reactNative'
               ? 'bg-teal-600 text-white shadow-sm'
@@ -99,7 +103,7 @@ export const DeveloperHub: React.FC = () => {
         </button>
 
         <button
-          onClick={() => setActiveTab('flutter')}
+          onClick={() => { taskCoordinator.stopAll('tab_changed'); setActiveTab('flutter'); }}
           className={`flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg transition ${
             activeTab === 'flutter'
               ? 'bg-teal-600 text-white shadow-sm'
@@ -111,7 +115,7 @@ export const DeveloperHub: React.FC = () => {
         </button>
 
         <button
-          onClick={() => setActiveTab('restApi')}
+          onClick={() => { taskCoordinator.stopAll('tab_changed'); setActiveTab('restApi'); }}
           className={`flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg transition ${
             activeTab === 'restApi'
               ? 'bg-teal-600 text-white shadow-sm'
@@ -123,7 +127,7 @@ export const DeveloperHub: React.FC = () => {
         </button>
 
         <button
-          onClick={() => setActiveTab('batch')}
+          onClick={() => { taskCoordinator.stopAll('tab_changed'); setActiveTab('batch'); }}
           className={`flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg transition ${
             activeTab === 'batch'
               ? 'bg-teal-600 text-white shadow-sm'

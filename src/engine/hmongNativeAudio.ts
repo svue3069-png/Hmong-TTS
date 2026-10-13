@@ -195,10 +195,10 @@ function getActiveSpeechBounds(buffer: AudioBuffer): AudioTrimBounds {
   // Energy threshold: 4% of peak or min 0.008
   const threshold = Math.max(0.008, peak * 0.04);
 
-  // 10ms protective onset pre-roll to preserve soft consonants (voiceless nasals hm/hn, fricatives s/x/z)
-  const onsetMargin = Math.floor(sampleRate * 0.010);
-  // 22ms protective release post-roll to preserve vowel off-glides, nasal tails, and tones
-  const releaseMargin = Math.floor(sampleRate * 0.022);
+  // 16ms protective onset pre-roll to preserve soft consonants (voiceless nasals hm/hn, fricatives s/x/z)
+  const onsetMargin = Math.floor(sampleRate * 0.016);
+  // 30ms protective release post-roll to preserve vowel off-glides, nasal tails, and tones
+  const releaseMargin = Math.floor(sampleRate * 0.030);
 
   let firstActive = 0;
   for (let i = 0; i < len; i++) {
@@ -382,9 +382,9 @@ export async function assembleNativeHmongTrack(
   let nativeCount = 0;
   let totalWordsCount = 0;
 
-  // Connected conversational Hmong pacing: 1.22x base speed converts slow dictionary citation recordings
-  // into natural, lively speech flow matching conversational Hmong media.
-  const naturalFlowRate = 1.22 * rate;
+  // Connected conversational Hmong pacing: measured, clear, and articulate
+  // Prevents rushing while keeping natural sentence liaison
+  const naturalFlowRate = 1.08 * rate;
 
   for (let i = 0; i < parsedSyllables.length; i++) {
     const syl = parsedSyllables[i];
@@ -502,22 +502,25 @@ export async function assembleNativeHmongTrack(
       const srcSampleRate = seg.audioBuffer.sampleRate;
       const bounds = seg.trimBounds;
 
-      // Resampling ratio with pitch shift interpolation:
-      // pitchShift = 2^(semitones / 12)
-      const pitchRatio = Math.pow(2, seg.f0ShiftSemitones / 12);
-      const speedRatio = (bounds.activeLength / seg.lengthSamples) * (srcSampleRate / sampleRate);
-
+      // High-fidelity speech interpolation that preserves natural human vocal tract formants:
+      // Advances through the complete active speech bounds without premature cutoffs or truncation
       const numSamplesToWrite = seg.lengthSamples;
-      // Soft attack & release micro-envelopes to guarantee zero digital pops/clicks
-      const attackSamples = Math.min(96, Math.floor(numSamplesToWrite * 0.06));
-      const releaseSamples = Math.min(160, Math.floor(numSamplesToWrite * 0.10));
+      const effectiveLength = Math.max(1, numSamplesToWrite);
+      const totalSrcSamples = bounds.activeLength * (srcSampleRate / sampleRate);
+
+      // Sentence intonational dynamics: sentence starts with higher projection (+1.2 dB), decays smoothly
+      const sentDynamics = Math.max(0.78, Math.min(1.15, 1.0 + seg.f0ShiftSemitones * 0.045));
+
+      // Raised-cosine windowing for smooth legato inter-word liaison without clicks
+      const attackSamples = Math.max(48, Math.min(Math.floor(sampleRate * 0.012), Math.floor(numSamplesToWrite * 0.08)));
+      const releaseSamples = Math.max(64, Math.min(Math.floor(sampleRate * 0.024), Math.floor(numSamplesToWrite * 0.12)));
 
       for (let j = 0; j < numSamplesToWrite; j++) {
         const outIdx = seg.startSample + j;
         if (outIdx >= outData.length) break;
 
-        // Linear interpolation with active speech offset
-        const srcPos = bounds.startSample + (j * speedRatio * pitchRatio);
+        const progress = j / effectiveLength;
+        const srcPos = bounds.startSample + progress * totalSrcSamples;
         const srcIdx = Math.floor(srcPos);
         const frac = srcPos - srcIdx;
 
@@ -528,11 +531,13 @@ export async function assembleNativeHmongTrack(
           sample = srcData[srcIdx];
         }
 
-        // Anti-click attack and release smoothing
+        // Anti-click raised-cosine smoothing (Hanning curves for zero-derivative continuity)
         if (j < attackSamples) {
-          sample *= (j / attackSamples);
+          const t = j / attackSamples;
+          sample *= 0.5 * (1 - Math.cos(Math.PI * t));
         } else if (j > numSamplesToWrite - releaseSamples) {
-          sample *= ((numSamplesToWrite - j) / releaseSamples);
+          const t = (numSamplesToWrite - j) / releaseSamples;
+          sample *= 0.5 * (1 - Math.cos(Math.PI * t));
         }
 
         // Terminal Decrescendo before period: gentle settling volume envelope
@@ -544,7 +549,7 @@ export async function assembleNativeHmongTrack(
           }
         }
 
-        outData[outIdx] += sample * 0.90;
+        outData[outIdx] += sample * 0.92 * sentDynamics;
       }
     } else if (options.fallbackSynthesizer) {
       // Synthesize missing syllable via fallback DSP
@@ -559,16 +564,44 @@ export async function assembleNativeHmongTrack(
     }
   }
 
-  // Peak normalization
+  // Phase 3.5: Master Audio Conditioning (DC Removal, High-pass Filter & Distortion-Free Normalization)
+  // 1. Remove DC bias across the entire stitched track
+  let dcSum = 0;
+  for (let i = 0; i < outData.length; i++) dcSum += outData[i];
+  const dcOffset = dcSum / (outData.length || 1);
+  for (let i = 0; i < outData.length; i++) outData[i] -= dcOffset;
+
+  // 2. High-pass DC-blocking filter (~35Hz) to strip rumble and prevent speaker popping
+  let prevIn = 0;
+  let prevOut = 0;
+  const hpR = 0.995;
+  for (let i = 0; i < outData.length; i++) {
+    const curIn = outData[i];
+    const curOut = curIn - prevIn + hpR * prevOut;
+    prevIn = curIn;
+    prevOut = curOut;
+    outData[i] = curOut;
+  }
+
+  // 3. Distortion-free studio mastering: linear peak scaling to -1.0 dBFS (0.891)
   let maxPeak = 0;
   for (let i = 0; i < outData.length; i++) {
     const abs = Math.abs(outData[i]);
     if (abs > maxPeak) maxPeak = abs;
   }
-  if (maxPeak > 0.001) {
-    const gain = Math.min(2.5, 0.88 / maxPeak);
+
+  if (maxPeak > 0.0001) {
+    const targetPeak = 0.891;
+    const cleanGain = Math.min(3.0, targetPeak / maxPeak);
     for (let i = 0; i < outData.length; i++) {
-      outData[i] = Math.tanh(outData[i] * gain);
+      let s = outData[i] * cleanGain;
+      // Transparent soft knee only at the extreme ceiling to avoid harsh square clipping
+      if (s > 0.92) {
+        s = 0.92 + 0.08 * Math.tanh((s - 0.92) / 0.08);
+      } else if (s < -0.92) {
+        s = -0.92 + 0.08 * Math.tanh((s + 0.92) / 0.08);
+      }
+      outData[i] = s;
     }
   }
 

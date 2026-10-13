@@ -174,7 +174,9 @@ const COMMON_PREWARM_WORDS = [
   'nyob', 'zoo', 'sawv', 'daws', 'kuv', 'koj', 'peb', 'nej', 'siab', 'heev',
   'tau', 'ntsib', 'hnub', 'no', 'ua', 'tsaug', 'yog', 'mas', 'ces', 'mus',
   'tuaj', 'los', 'rau', 'cov', 'tus', 'lub', 'yam', 'txog', 'ntawm', 'suav',
-  'lawv', 'txaus', 'li', 'os', 'thov', 'nrog', 'txoj', 'kev', 'pab', 'zoo'
+  'lawv', 'txaus', 'li', 'os', 'thov', 'nrog', 'txoj', 'kev', 'pab', 'zoo',
+  // Moob Leeg (Green Hmong) high-frequency equivalents
+  'moog', 'lug', 'nub', 'nua', 'mej', 'paab', 'rua', 'txuj', 'hab', 'dleev', 'dlaag'
 ];
 
 async function prewarmCommonAudio() {

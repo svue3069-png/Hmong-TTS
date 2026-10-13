@@ -39,6 +39,7 @@ import {
   parseHmongSyllable,
 } from '../engine/hmongPhonology';
 import { hmongTTS } from '../engine/hmongAudioSynthesizer';
+import { taskCoordinator } from '../engine/taskCoordinator';
 
 interface FixPronunciationModalProps {
   isOpen: boolean;
@@ -67,8 +68,12 @@ export const FixPronunciationModal: React.FC<FixPronunciationModalProps> = ({
   const [searchFilter, setSearchFilter] = useState('');
   const [allCorrections, setAllCorrections] = useState<PronunciationOverride[]>([]);
 
-  // Refresh list whenever opened
+  // Refresh list whenever opened and register stop handler
   useEffect(() => {
+    const unregister = taskCoordinator.registerStopHandler('fix_pronunciation', () => {
+      setIsPlayingTest(false);
+    });
+
     if (isOpen) {
       refreshList();
       const cleanTarget = targetWord.replace(/[^a-zA-Z]/g, '').toLowerCase().trim();
@@ -85,6 +90,10 @@ export const FixPronunciationModal: React.FC<FixPronunciationModalProps> = ({
       }
       setSaveSuccess(false);
     }
+
+    return () => {
+      unregister();
+    };
   }, [isOpen, targetWord]);
 
   const refreshList = () => {
@@ -138,6 +147,7 @@ export const FixPronunciationModal: React.FC<FixPronunciationModalProps> = ({
   // Live test pronunciation audio playback
   const handleTestPronounce = async () => {
     if (!word.trim()) return;
+    taskCoordinator.notifyTaskStarted('fix_pronunciation');
     setIsPlayingTest(true);
     try {
       // 1. Try native audio single-word endpoint first
@@ -234,7 +244,7 @@ export const FixPronunciationModal: React.FC<FixPronunciationModalProps> = ({
             <div>
               <h2 className="text-base font-bold text-white flex items-center gap-2">
                 Fix Word Pronunciation & Override Engine
-                <span className="text-[10px] font-mono font-medium px-2 py-0.5 rounded-full bg-amber-950/60 text-amber-300 border border-amber-800/50">
+                <span className="text-[10px] font-mono font-medium px-2 py-0.5 rounded bg-amber-950/60 text-amber-300 border border-amber-800/50">
                   G2P Lexicon
                 </span>
               </h2>

@@ -119,46 +119,54 @@ export const AudioPlayerController: React.FC<AudioPlayerControllerProps> = ({
           </div>
 
           <div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-bold text-slate-200">
+            <div className="flex items-center gap-2 text-xs">
+              <span className="font-semibold text-slate-100">
                 {track
                   ? `Track: ${track.text.slice(0, 36)}${track.text.length > 36 ? '...' : ''}`
                   : 'Synthesizer Audio Player'}
               </span>
 
               {isEnded && (
-                <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-300 bg-emerald-950/80 px-2 py-0.5 rounded-full border border-emerald-800/50 animate-in fade-in">
-                  <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-                  Finished • Track Saved (Ready to Relisten)
-                </span>
+                <>
+                  <span className="text-slate-600" aria-hidden="true">·</span>
+                  <span className="text-xs text-emerald-400 font-medium">
+                    Finished · Ready to relisten
+                  </span>
+                </>
               )}
 
               {isPlaying && (
-                <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-teal-300 bg-teal-950/80 px-2 py-0.5 rounded-full border border-teal-800/50">
-                  <span className="w-1.5 h-1.5 rounded-full bg-teal-400 animate-ping" />
-                  Playing ({playbackSpeed}x)
-                </span>
+                <>
+                  <span className="text-slate-600" aria-hidden="true">·</span>
+                  <span className="text-xs text-teal-400 font-medium">
+                    Playing ({playbackSpeed}x)
+                  </span>
+                </>
               )}
 
               {isPaused && (
-                <span className="text-[10px] font-semibold text-amber-300 bg-amber-950/80 px-2 py-0.5 rounded-full border border-amber-800/50">
-                  Paused at {formatTime(currentTime)}
-                </span>
+                <>
+                  <span className="text-slate-600" aria-hidden="true">·</span>
+                  <span className="text-xs text-amber-400 font-medium">
+                    Paused at {formatTime(currentTime)}
+                  </span>
+                </>
               )}
             </div>
 
-            <p className="text-[11px] text-slate-400 mt-0.5 flex flex-wrap items-center gap-1.5">
+            <div className="text-xs text-slate-400 mt-1 flex flex-wrap items-center gap-2">
               {track ? (
                 <>
                   <span>{track.dialect === 'dawb' ? 'White Hmong (Hmoob Dawb)' : 'Green Hmong (Moob Leeg)'}</span>
-                  <span>•</span>
+                  <span className="text-slate-600" aria-hidden="true">·</span>
                   {track.engine === 'hmongdictionary_native' ? (
                     <>
-                      <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-300 bg-emerald-950/60 px-1.5 py-0.5 rounded border border-emerald-800/40">
-                        🎙️ HmongDictionary.com Native Voice
+                      <span className="text-emerald-400 font-medium">
+                        HmongDictionary.com Native Voice
                       </span>
-                      <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-teal-300 bg-teal-950/60 px-1.5 py-0.5 rounded border border-teal-800/40" title="Whole-sentence natural reading flow with authentic tonal cadence and dedicated stop at period">
-                        ✨ Natural Sentence Cadence • Stop at Period
+                      <span className="text-slate-600" aria-hidden="true">·</span>
+                      <span className="text-slate-400">
+                        Natural Sentence Cadence
                       </span>
                     </>
                   ) : (
@@ -166,9 +174,9 @@ export const AudioPlayerController: React.FC<AudioPlayerControllerProps> = ({
                   )}
                 </>
               ) : (
-                'Render or speak any sentence with authentic Hmong native human pronunciation.'
+                <span>Synthesize or speak any sentence with authentic Hmong native human pronunciation.</span>
               )}
-            </p>
+            </div>
           </div>
         </div>
 
@@ -203,9 +211,9 @@ export const AudioPlayerController: React.FC<AudioPlayerControllerProps> = ({
 
       {/* Interactive Timeline & Scrubber Bar */}
       <div className="space-y-1.5">
-        <div className="flex items-center justify-between text-xs font-mono text-slate-400 select-none">
-          <span className="text-teal-300 font-bold">{formatTime(currentTime)}</span>
-          <span className="text-slate-500">
+        <div className="flex items-center justify-between text-xs font-mono tabular-nums text-slate-400 select-none">
+          <span className="text-teal-300 font-bold tabular-nums">{formatTime(currentTime)}</span>
+          <span className="text-slate-500 tabular-nums">
             {duration > 0 ? formatTime(duration) : '00:00.0'}
           </span>
         </div>
@@ -214,12 +222,12 @@ export const AudioPlayerController: React.FC<AudioPlayerControllerProps> = ({
         <div
           ref={progressBarRef}
           onClick={handleProgressBarClick}
-          className="relative w-full h-3 bg-slate-900 rounded-full cursor-pointer overflow-hidden border border-slate-800 hover:border-teal-500/50 transition group"
+          className="relative w-full h-3 bg-slate-900 rounded-md cursor-pointer overflow-hidden border border-slate-800 hover:border-teal-500/50 transition group"
           title="Click or drag to seek to any point in the track"
         >
           {/* Progress fill */}
           <div
-            className={`h-full transition-all duration-75 rounded-full ${
+            className={`h-full transition-all duration-75 rounded-md ${
               isEnded
                 ? 'bg-emerald-500'
                 : 'bg-gradient-to-r from-teal-500 to-sky-400 shadow-lg shadow-teal-500/30'

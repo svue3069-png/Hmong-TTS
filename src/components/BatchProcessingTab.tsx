@@ -7,7 +7,8 @@
  * paragraphs/sentences and exporting all synthesized Hmong audio files in a single ZIP archive.
  */
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
+import { taskCoordinator } from '../engine/taskCoordinator';
 import {
   FolderArchive,
   Upload,
@@ -41,6 +42,16 @@ export const BatchProcessingTab: React.FC = () => {
   const [zipBlob, setZipBlob] = useState<Blob | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const abortRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    const unregister = taskCoordinator.registerStopHandler('batch_processing', () => {
+      abortRef.current = true;
+      setIsProcessing(false);
+      setStatusMessage('Batch task paused/stopped due to tab or screen switch.');
+    });
+    return () => unregister();
+  }, []);
 
   // Handle file uploads (.txt or .csv)
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -72,10 +83,12 @@ export const BatchProcessingTab: React.FC = () => {
       .filter((l) => l && !l.startsWith('#'));
 
     if (lines.length === 0) {
-      alert('Please enter or upload at least one sentence or text line for batch processing.');
+      setStatusMessage('Please enter or upload at least one sentence or text line for batch processing.');
       return;
     }
 
+    abortRef.current = false;
+    taskCoordinator.notifyTaskStarted('batch_processing');
     setIsProcessing(true);
     setProgressPercent(0);
     setCompletedItemsCount(0);
@@ -87,6 +100,11 @@ export const BatchProcessingTab: React.FC = () => {
 
       let completed = 0;
       for (let i = 0; i < lines.length; i++) {
+        if (abortRef.current) {
+          setStatusMessage('Batch synthesis stopped.');
+          break;
+        }
+
         const line = lines[i];
         setStatusMessage(`Synthesizing item ${i + 1} of ${lines.length}: "${line.slice(0, 30)}..."`);
 
@@ -96,6 +114,11 @@ export const BatchProcessingTab: React.FC = () => {
           rate,
           pitch,
         });
+
+        if (abortRef.current) {
+          setStatusMessage('Batch synthesis stopped.');
+          break;
+        }
 
         const wavBlob = hmongTTS.encodeWav(buffer);
         const arrayBuffer = await wavBlob.arrayBuffer();
@@ -114,15 +137,18 @@ export const BatchProcessingTab: React.FC = () => {
         setProgressPercent(Math.round((completed / lines.length) * 100));
       }
 
-      setStatusMessage('Packaging ZIP archive...');
-      const generatedZip = await zip.generateAsync({ type: 'blob' });
-      setZipBlob(generatedZip);
-      setStatusMessage(`Successfully synthesized ${lines.length} audio files into ZIP archive!`);
+      if (!abortRef.current) {
+        setStatusMessage('Packaging ZIP archive...');
+        const generatedZip = await zip.generateAsync({ type: 'blob' });
+        setZipBlob(generatedZip);
+        setStatusMessage(`Successfully synthesized ${lines.length} audio files into ZIP archive!`);
+      }
     } catch (err) {
       console.error('Batch synthesis error:', err);
       setStatusMessage('Error during batch synthesis. Check console for details.');
     } finally {
       setIsProcessing(false);
+      taskCoordinator.notifyTaskEnded('batch_processing');
     }
   };
 

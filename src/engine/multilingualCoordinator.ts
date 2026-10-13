@@ -23,6 +23,7 @@ export interface MultilingualSpeechOptions {
   toneEmphasis?: number;
   prosody?: number;
   volume?: number;
+  audioSource?: 'hmongdictionary_native' | 'hmong_dsp';
   onStart?: (engine: ActiveEngineType, detected: DetectionResult) => void;
   onWord?: (index: number, token: string, engine: ActiveEngineType) => void;
   onEnd?: () => void;
@@ -61,23 +62,24 @@ export class MultilingualCoordinator {
     const mode = options.mode || 'auto';
 
     // Determine target engine
-    let targetEngine: ActiveEngineType = 'hmong_dsp';
+    const hmongEngineChoice: ActiveEngineType = options.audioSource === 'hmong_dsp' ? 'hmong_dsp' : 'hmongdictionary_native';
+    let targetEngine: ActiveEngineType = hmongEngineChoice;
     let targetDialect: HmongDialect = detection.detectedDialect || 'dawb';
 
     if (mode === 'english') {
       targetEngine = 'web_speech';
     } else if (mode === 'hmong_dawb') {
-      targetEngine = 'hmong_dsp';
+      targetEngine = hmongEngineChoice;
       targetDialect = 'dawb';
     } else if (mode === 'hmong_leeg') {
-      targetEngine = 'hmong_dsp';
+      targetEngine = hmongEngineChoice;
       targetDialect = 'leeg';
     } else {
       // mode === 'auto'
       if (detection.language === 'english') {
         targetEngine = 'web_speech';
       } else {
-        targetEngine = 'hmong_dsp';
+        targetEngine = hmongEngineChoice;
         targetDialect = detection.detectedDialect || 'dawb';
       }
     }
@@ -110,7 +112,7 @@ export class MultilingualCoordinator {
           },
         });
       } else {
-        // Hmong Acoustic Engine
+        // Hmong Voice Engine (Authentic Native Audio from HmongDictionary.com or DSP)
         const voice = options.hmongVoice || (targetDialect === 'leeg' ? HMONG_VOICE_PROFILES[2] : HMONG_VOICE_PROFILES[0]);
         await hmongTTS.speak(text, targetDialect, {
           voice,
@@ -119,8 +121,9 @@ export class MultilingualCoordinator {
           toneEmphasis: options.toneEmphasis,
           prosody: options.prosody,
           volume: options.volume,
+          audioSource: options.audioSource || 'hmongdictionary_native',
           onSyllable: (idx, syl) => {
-            if (options.onWord) options.onWord(idx, syl.clean || syl.raw, 'hmong_dsp');
+            if (options.onWord) options.onWord(idx, syl.clean || syl.raw, targetEngine);
           },
           onEnd: () => {
             this.isSpeaking = false;

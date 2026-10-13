@@ -9,6 +9,7 @@
  */
 
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { taskCoordinator } from '../engine/taskCoordinator';
 
 export interface VoiceRecording {
   blob: Blob;
@@ -90,6 +91,27 @@ export function useVoiceRecorder(options: UseVoiceRecorderOptions = {}) {
     };
   }, []);
 
+  // Register with taskCoordinator to immediately stop recording or playback on tab switch or window blur
+  useEffect(() => {
+    const unregister = taskCoordinator.registerStopHandler('voice_recorder', () => {
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+        try {
+          mediaRecorderRef.current.stop();
+        } catch (_) {}
+        setIsRecording(false);
+        setIsPaused(false);
+      }
+      if (audioElementRef.current && !audioElementRef.current.paused) {
+        audioElementRef.current.pause();
+        setIsPlayingRecording(false);
+      }
+    });
+
+    return () => {
+      unregister();
+    };
+  }, []);
+
   const stopTracks = () => {
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => track.stop());
@@ -151,6 +173,7 @@ export function useVoiceRecorder(options: UseVoiceRecorderOptions = {}) {
           autoGainControl: true,
         },
       });
+      taskCoordinator.notifyTaskStarted('voice_recorder');
       streamRef.current = stream;
 
       // Select supported audio mimeType
@@ -287,6 +310,7 @@ export function useVoiceRecorder(options: UseVoiceRecorderOptions = {}) {
     }
     setIsRecording(false);
     setIsPaused(false);
+    taskCoordinator.notifyTaskEnded('voice_recorder');
   }, []);
 
 function safelyTeardownAudioElement(audio: HTMLAudioElement | null) {
@@ -350,6 +374,7 @@ function safelyTeardownAudioElement(audio: HTMLAudioElement | null) {
         setRecordingCurrentTime(0);
         setIsRecordingEnded(false);
       }
+      taskCoordinator.notifyTaskStarted('voice_recorder');
       audio.playbackRate = recordingSpeedRef.current;
       audio.play()
         .then(() => {
@@ -357,6 +382,7 @@ function safelyTeardownAudioElement(audio: HTMLAudioElement | null) {
           setIsRecordingEnded(false);
         })
         .catch((err) => {
+          taskCoordinator.notifyTaskEnded('voice_recorder');
           if (err && err.name !== 'AbortError') {
             console.warn('Voice playback note:', err?.message || err);
           }
@@ -369,6 +395,7 @@ function safelyTeardownAudioElement(audio: HTMLAudioElement | null) {
     if (audioElementRef.current) {
       audioElementRef.current.pause();
       setIsPlayingRecording(false);
+      taskCoordinator.notifyTaskEnded('voice_recorder');
     }
   }, []);
 

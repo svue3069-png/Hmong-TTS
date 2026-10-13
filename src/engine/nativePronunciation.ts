@@ -154,6 +154,133 @@ export const NATIVE_LEXICON_DAWB: Record<string, NativeWordTuning> = {
     f1Start: 520, f2Start: 1880, f1End: 520, f2End: 1880,
     durationMultiplier: 1.05,
   },
+  // "pab" [pa˥˥] - High level tone, bilabial stop
+  pab: {
+    f0Multiplier: 1.20,
+    pitchTrajectory: [1.0, 1.0, 0.99, 0.98],
+    f1Start: 850, f2Start: 1250, f1End: 850, f2End: 1250,
+    durationMultiplier: 0.9,
+  },
+  // "kev" [ke˨˦] - Mid-rising tone
+  kev: {
+    f0Multiplier: 0.98,
+    pitchTrajectory: [0.44, 0.40, 0.68, 0.92],
+    f1Start: 520, f2Start: 1880, f1End: 520, f2End: 1880,
+    durationMultiplier: 1.0,
+  },
+  // "cuam" [cuə˨˩] - Palatal stop with creaky low tone
+  cuam: {
+    f0Multiplier: 0.75,
+    pitchTrajectory: [0.36, 0.30, 0.20, 0.14],
+    f1Start: 320, f2Start: 820, f1End: 580, f2End: 1420,
+    durationMultiplier: 1.1,
+    creakIntensity: 0.7,
+  },
+  // "ntau" [ⁿtau˧˧] - Prenasalized alveolar stop with unmarked mid tone
+  ntau: {
+    f0Multiplier: 1.0,
+    pitchTrajectory: [0.60, 0.60, 0.58, 0.56],
+    f1Start: 820, f2Start: 1250, f1End: 340, f2End: 850,
+    durationMultiplier: 1.05,
+    nasalIntensity: 0.6,
+    onsetType: 'prenasal',
+  },
+  // "thov" [tʰɔ˨˦] - Aspirated alveolar stop with mid-rising tone
+  thov: {
+    f0Multiplier: 0.98,
+    pitchTrajectory: [0.44, 0.38, 0.68, 0.94],
+    f1Start: 510, f2Start: 870, f1End: 510, f2End: 870,
+    durationMultiplier: 1.05,
+    aspirationIntensity: 0.75,
+    onsetType: 'aspirated',
+  },
+  // --- TONE SANDHI & CONVERSATIONAL LEXICON ---
+  // "tug" [tu˦˨̤] - Tone sandhi form of 'tus' after numerals: breathy falling tone
+  tug: {
+    f0Multiplier: 1.02,
+    pitchTrajectory: [0.82, 0.70, 0.46, 0.28],
+    f1Start: 320, f2Start: 820, f1End: 320, f2End: 820,
+    durationMultiplier: 0.92,
+    breathyIntensity: 0.85,
+  },
+  // "lug" [lu˦˨̤] - Tone sandhi form of 'lub' after numerals: breathy falling tone
+  lug: {
+    f0Multiplier: 1.02,
+    pitchTrajectory: [0.82, 0.70, 0.46, 0.28],
+    f1Start: 320, f2Start: 820, f1End: 320, f2End: 820,
+    durationMultiplier: 0.92,
+    breathyIntensity: 0.82,
+  },
+  // "hnuv" [n̥u˨˦] - Tone sandhi form of 'hnub' after numerals: mid-rising tone
+  hnuv: {
+    f0Multiplier: 0.98,
+    pitchTrajectory: [0.44, 0.40, 0.68, 0.92],
+    f1Start: 320, f2Start: 820, f1End: 320, f2End: 820,
+    durationMultiplier: 0.95,
+    aspirationIntensity: 0.6,
+    onsetType: 'voiceless_nasal',
+  },
+  // "daiv" [dai˨˦] - Tone sandhi form of 'daim' after numerals: mid-rising tone
+  daiv: {
+    f0Multiplier: 0.98,
+    pitchTrajectory: [0.46, 0.40, 0.68, 0.92],
+    f1Start: 800, f2Start: 1250, f1End: 380, f2End: 2100,
+    durationMultiplier: 1.05,
+  },
+  // "rag" [ʐa˦˨̤] - Tone sandhi form of 'rab': breathy falling tone
+  rag: {
+    f0Multiplier: 1.02,
+    pitchTrajectory: [0.80, 0.68, 0.46, 0.28],
+    f1Start: 820, f2Start: 1250, f1End: 820, f2End: 1250,
+    durationMultiplier: 0.95,
+    breathyIntensity: 0.82,
+  },
+  // "leeg" [le˦˨̤] - Tone sandhi form of 'leej' after 'ib' ("ib leeg"): breathy falling
+  leeg: {
+    f0Multiplier: 1.02,
+    pitchTrajectory: [0.82, 0.70, 0.46, 0.28],
+    f1Start: 520, f2Start: 1880, f1End: 520, f2End: 1880,
+    durationMultiplier: 1.0,
+    breathyIntensity: 0.85,
+  },
+  // "nplej" [ⁿple˥˨] - Rice grain: prenasalized lateral cluster with high-falling tone
+  nplej: {
+    f0Multiplier: 1.16,
+    pitchTrajectory: [1.0, 0.96, 0.66, 0.35],
+    f1Start: 520, f2Start: 1880, f1End: 520, f2End: 1880,
+    durationMultiplier: 1.1,
+    onsetType: 'prenasal',
+  },
+  // "mov" [mɔ˨˦] - Cooked rice: mid-rising tone
+  mov: {
+    f0Multiplier: 0.98,
+    pitchTrajectory: [0.46, 0.40, 0.68, 0.92],
+    f1Start: 510, f2Start: 920, f1End: 510, f2End: 920,
+    durationMultiplier: 1.0,
+  },
+  // "dej" [de˥˨] - Water: high-falling tone
+  dej: {
+    f0Multiplier: 1.18,
+    pitchTrajectory: [1.0, 0.96, 0.66, 0.34],
+    f1Start: 520, f2Start: 1880, f1End: 520, f2End: 1880,
+    durationMultiplier: 1.05,
+  },
+  // "tshiab" [tʃʰia˥˥] - New / clean: aspirated affricate with high tone
+  tshiab: {
+    f0Multiplier: 1.22,
+    pitchTrajectory: [1.0, 1.0, 0.99, 0.98],
+    f1Start: 320, f2Start: 2150, f1End: 560, f2End: 1420,
+    durationMultiplier: 1.1,
+    aspirationIntensity: 0.8,
+    onsetType: 'aspirated',
+  },
+  // "meej" [me˥˨] - Articulate / clear: high-falling tone
+  meej: {
+    f0Multiplier: 1.16,
+    pitchTrajectory: [1.0, 0.96, 0.65, 0.36],
+    f1Start: 520, f2Start: 1880, f1End: 520, f2End: 1880,
+    durationMultiplier: 1.05,
+  },
 };
 
 export const NATIVE_LEXICON_LEEG: Record<string, NativeWordTuning> = {
@@ -182,6 +309,45 @@ export const NATIVE_LEXICON_LEEG: Record<string, NativeWordTuning> = {
     f1Start: 320, f2Start: 820, f1End: 320, f2End: 820,
     durationMultiplier: 0.95,
     breathyIntensity: 0.75,
+  },
+  // "paab" [paŋ˥˥] - Green Hmong nasalized aa with high level tone
+  paab: {
+    f0Multiplier: 1.20,
+    pitchTrajectory: [1.0, 1.0, 0.99, 0.98],
+    f1Start: 820, f2Start: 1280, f1End: 800, f2End: 1350,
+    durationMultiplier: 1.05,
+    nasalIntensity: 0.75,
+  },
+  // "dlaag" [tˡaŋ˦˨̤] - Green Hmong lateral release stop with breathy falling tone
+  dlaag: {
+    f0Multiplier: 1.05,
+    pitchTrajectory: [0.80, 0.66, 0.46, 0.28],
+    f1Start: 820, f2Start: 1280, f1End: 800, f2End: 1350,
+    durationMultiplier: 1.15,
+    breathyIntensity: 0.8,
+    nasalIntensity: 0.7,
+    onsetType: 'lateral',
+  },
+  // "nub" [nu˥˥] - Green Hmong high level tone
+  nub: {
+    f0Multiplier: 1.20,
+    pitchTrajectory: [1.0, 1.0, 0.99, 0.98],
+    f1Start: 320, f2Start: 820, f1End: 320, f2End: 820,
+    durationMultiplier: 0.88,
+  },
+  // "nua" [nuə˧˧] - Green Hmong mid tone
+  nua: {
+    f0Multiplier: 1.0,
+    pitchTrajectory: [0.55, 0.54, 0.52, 0.50],
+    f1Start: 320, f2Start: 820, f1End: 580, f2End: 1420,
+    durationMultiplier: 0.95,
+  },
+  // "suav" [ʂuə˨˦] - Green Hmong mid-rising tone
+  suav: {
+    f0Multiplier: 0.96,
+    pitchTrajectory: [0.42, 0.38, 0.70, 0.96],
+    f1Start: 320, f2Start: 820, f1End: 580, f2End: 1420,
+    durationMultiplier: 1.1,
   },
 };
 

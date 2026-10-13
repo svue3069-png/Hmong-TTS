@@ -61,8 +61,16 @@ export class WebSpeechEngine {
   }
 
   public stop(): void {
+    if (this.currentUtterance) {
+      this.currentUtterance.onstart = null;
+      this.currentUtterance.onend = null;
+      this.currentUtterance.onerror = null;
+      this.currentUtterance.onboundary = null;
+    }
     if (this.synth) {
-      this.synth.cancel();
+      try {
+        this.synth.cancel();
+      } catch (_) {}
     }
     this.isSpeakingState = false;
     this.currentUtterance = null;

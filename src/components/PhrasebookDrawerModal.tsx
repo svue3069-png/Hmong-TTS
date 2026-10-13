@@ -9,7 +9,8 @@
  * IPA transcription, English translation, and 1-click loading into the speech studio.
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
+import { taskCoordinator } from '../engine/taskCoordinator';
 import {
   X,
   Search,
@@ -32,6 +33,7 @@ import {
   HmongPhraseItem,
 } from '../engine/hmongPhrasebookData';
 import { HmongDialect, parseHmongText } from '../engine/hmongPhonology';
+import { hmongTTS } from '../engine/hmongAudioSynthesizer';
 
 interface PhrasebookDrawerModalProps {
   isOpen: boolean;
@@ -49,6 +51,31 @@ export const PhrasebookDrawerModal: React.FC<PhrasebookDrawerModalProps> = ({
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [playingPhraseId, setPlayingPhraseId] = useState<string | null>(null);
+  const activeAudioRef = useRef<HTMLAudioElement | null>(null);
+
+  useEffect(() => {
+    const unregister = taskCoordinator.registerStopHandler('phrasebook_drawer', () => {
+      hmongTTS.stop();
+      if (activeAudioRef.current) {
+        try {
+          activeAudioRef.current.pause();
+          activeAudioRef.current = null;
+        } catch (_) {}
+      }
+      setPlayingPhraseId(null);
+    });
+
+    return () => {
+      unregister();
+      hmongTTS.stop();
+      if (activeAudioRef.current) {
+        try {
+          activeAudioRef.current.pause();
+          activeAudioRef.current = null;
+        } catch (_) {}
+      }
+    };
+  }, []);
 
   const getCategoryIcon = (id: string) => {
     switch (id) {
@@ -89,18 +116,43 @@ export const PhrasebookDrawerModal: React.FC<PhrasebookDrawerModalProps> = ({
   }, [selectedCategory, searchQuery]);
 
   const handlePlayPhrasePreview = (phrase: HmongPhraseItem) => {
-    setPlayingPhraseId(phrase.id);
-    // Use speech synthesis on the clean text
-    const words = phrase.hmong.replace(/[^a-zA-Z\s]/g, '').trim().split(/\s+/);
-    if (words.length === 1) {
-      const audio = new Audio(`/api/audio/hmong-word/${encodeURIComponent(words[0])}`);
-      audio.play().catch(() => {});
-      setTimeout(() => setPlayingPhraseId(null), 1000);
-    } else {
-      // Load into studio player
-      onSelectPhrase(phrase.hmong, phrase.english);
-      onClose();
+    if (playingPhraseId === phrase.id) {
+      hmongTTS.stop();
+      if (activeAudioRef.current) {
+        try {
+          activeAudioRef.current.pause();
+          activeAudioRef.current = null;
+        } catch (_) {}
+      }
+      setPlayingPhraseId(null);
+      taskCoordinator.notifyTaskEnded('phrasebook_drawer');
+      return;
     }
+
+    hmongTTS.stop();
+    if (activeAudioRef.current) {
+      try {
+        activeAudioRef.current.pause();
+        activeAudioRef.current = null;
+      } catch (_) {}
+    }
+
+    setPlayingPhraseId(phrase.id);
+    taskCoordinator.notifyTaskStarted('phrasebook_drawer');
+
+    // Plays the phrase with authentic native speaker priority
+    hmongTTS.speak(phrase.hmong, dialect, {
+      rate: 0.92,
+      audioSource: 'hmongdictionary_native',
+      onEnd: () => {
+        setPlayingPhraseId(null);
+        taskCoordinator.notifyTaskEnded('phrasebook_drawer');
+      },
+      onError: () => {
+        setPlayingPhraseId(null);
+        taskCoordinator.notifyTaskEnded('phrasebook_drawer');
+      },
+    });
   };
 
   if (!isOpen) return null;
@@ -117,7 +169,7 @@ export const PhrasebookDrawerModal: React.FC<PhrasebookDrawerModalProps> = ({
             <div>
               <h2 className="text-base font-bold text-white flex items-center gap-2">
                 Hmoob Phrasebook & Cultural Idioms
-                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-950/60 text-emerald-300 border border-emerald-800/50">
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-950/60 text-emerald-300 border border-emerald-800/50">
                   {HMONG_PHRASES.length} Phrases
                 </span>
               </h2>
@@ -196,13 +248,22 @@ export const PhrasebookDrawerModal: React.FC<PhrasebookDrawerModalProps> = ({
                   className="p-3.5 bg-slate-800/50 hover:bg-slate-800/80 border border-slate-700/60 rounded-xl transition flex flex-col sm:flex-row sm:items-center justify-between gap-3 group"
                 >
                   <div className="space-y-1 min-w-0">
-                    <div className="flex items-center gap-2.5">
+                    <div className="flex items-center gap-2">
                       <span className="font-bold text-white text-sm sm:text-base tracking-wide font-mono">
                         {phrase.hmong}
                       </span>
-                      <span className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-amber-950/60 text-amber-300 border border-amber-800/40 font-semibold">
-                        {respelling}
+                      <span className="text-slate-500" aria-hidden="true">·</span>
+                      <span className="text-xs font-mono text-amber-300/90 font-medium">
+                        /{respelling}/
                       </span>
+                      {ipa && (
+                        <>
+                          <span className="text-slate-600 hidden sm:inline" aria-hidden="true">·</span>
+                          <span className="text-[11px] font-mono text-slate-400 hidden sm:inline">
+                            {ipa}
+                          </span>
+                        </>
+                      )}
                     </div>
 
                     <div className="flex items-center gap-2 text-xs">
@@ -226,11 +287,15 @@ export const PhrasebookDrawerModal: React.FC<PhrasebookDrawerModalProps> = ({
                   <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
                     <button
                       onClick={() => handlePlayPhrasePreview(phrase)}
-                      className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-emerald-400 rounded-xl text-xs font-semibold border border-slate-700/60 transition active:scale-95 flex items-center gap-1.5"
-                      title="Hear pronunciation"
+                      className={`px-3 py-1.5 rounded-xl text-xs font-semibold border transition active:scale-95 flex items-center gap-1.5 ${
+                        playingPhraseId === phrase.id
+                          ? 'bg-emerald-950/90 border-emerald-500 text-emerald-300 ring-1 ring-emerald-500/30'
+                          : 'bg-slate-800 hover:bg-slate-700 text-emerald-400 border-slate-700/60'
+                      }`}
+                      title={playingPhraseId === phrase.id ? 'Stop playing' : 'Hear native pronunciation'}
                     >
-                      <Volume2 className="w-3.5 h-3.5" />
-                      <span>Hear</span>
+                      <Volume2 className={`w-3.5 h-3.5 ${playingPhraseId === phrase.id ? 'animate-bounce text-emerald-300' : ''}`} />
+                      <span>{playingPhraseId === phrase.id ? 'Playing' : 'Hear'}</span>
                     </button>
 
                     <button

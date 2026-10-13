@@ -199,6 +199,7 @@ export class HmongAcousticEngine {
   private ctx: AudioContext | null = null;
   private isSpeaking = false;
   private currentSource: AudioBufferSourceNode | null = null;
+  private currentGainNode: GainNode | null = null;
   private analyserNode: AnalyserNode | null = null;
   private animationFrameId: number | null = null;
   private activeTimers: number[] = [];
@@ -226,15 +227,27 @@ export class HmongAcousticEngine {
     this.activeTimers.forEach(id => clearTimeout(id));
     this.activeTimers = [];
 
-    if (this.currentSource) {
+    // Smooth gain ramp-down (15ms) prevents popping clicks when stopping
+    if (this.currentGainNode && this.ctx) {
       try {
-        this.currentSource.stop();
-        this.currentSource.disconnect();
-      } catch {
-        // already stopped
-      }
+        const curTime = this.ctx.currentTime;
+        this.currentGainNode.gain.cancelScheduledValues(curTime);
+        this.currentGainNode.gain.setValueAtTime(this.currentGainNode.gain.value, curTime);
+        this.currentGainNode.gain.linearRampToValueAtTime(0, curTime + 0.015);
+      } catch (_) {}
+    }
+
+    if (this.currentSource) {
+      const src = this.currentSource;
+      window.setTimeout(() => {
+        try {
+          src.stop();
+          src.disconnect();
+        } catch (_) {}
+      }, 18);
       this.currentSource = null;
     }
+    this.currentGainNode = null;
     this.isSpeaking = false;
     if (this.animationFrameId) {
       cancelAnimationFrame(this.animationFrameId);
@@ -438,17 +451,38 @@ export class HmongAcousticEngine {
       );
     }
 
-    // Peak normalization and broadcast soft-limiting for rich, clean, audible volume
+    // Master Audio Conditioning: DC bias removal, 35Hz rumble filter, and distortion-free linear normalization
+    let dcSum = 0;
+    for (let i = 0; i < channelData.length; i++) dcSum += channelData[i];
+    const dcMean = dcSum / (channelData.length || 1);
+    for (let i = 0; i < channelData.length; i++) channelData[i] -= dcMean;
+
+    let prevIn = 0;
+    let prevOut = 0;
+    const hpR = 0.995;
+    for (let i = 0; i < channelData.length; i++) {
+      const curIn = channelData[i];
+      const curOut = curIn - prevIn + hpR * prevOut;
+      prevIn = curIn;
+      prevOut = curOut;
+      channelData[i] = curOut;
+    }
+
     let maxPeak = 0;
     for (let i = 0; i < channelData.length; i++) {
       const absVal = Math.abs(channelData[i]);
       if (absVal > maxPeak) maxPeak = absVal;
     }
-    if (maxPeak > 0.001) {
-      const targetGain = Math.min(2.8, 0.88 / maxPeak);
+    if (maxPeak > 0.0001) {
+      const targetGain = Math.min(3.0, 0.891 / maxPeak);
       for (let i = 0; i < channelData.length; i++) {
-        // Soft saturation prevents any harsh clipping
-        channelData[i] = Math.tanh(channelData[i] * targetGain);
+        let s = channelData[i] * targetGain;
+        if (s > 0.92) {
+          s = 0.92 + 0.08 * Math.tanh((s - 0.92) / 0.08);
+        } else if (s < -0.92) {
+          s = -0.92 + 0.08 * Math.tanh((s + 0.92) / 0.08);
+        }
+        channelData[i] = s;
       }
     }
 
@@ -735,8 +769,13 @@ export class HmongAcousticEngine {
       lpState = lpState * 0.82 + combined * 0.18;
       const warmedSignal = combined * 0.7 + lpState * 0.3;
 
-      // Warm analog saturation
-      const finalSample = Math.tanh(warmedSignal * 1.6) * env * 0.62;
+      // Clean acoustic vocal tract output with transparent headroom
+      let finalSample = warmedSignal * 0.92 * env;
+      if (finalSample > 0.85) {
+        finalSample = 0.85 + 0.15 * Math.tanh((finalSample - 0.85) / 0.15);
+      } else if (finalSample < -0.85) {
+        finalSample = -0.85 + 0.15 * Math.tanh((finalSample + 0.85) / 0.15);
+      }
       output[outIdx] += finalSample;
     }
   }
@@ -768,14 +807,17 @@ export class HmongAcousticEngine {
     if (options.onStart) options.onStart();
 
     try {
-      const { buffer, syllables, totalDuration } = await this.renderToAudioBuffer(text, dialect, options);
+      const { buffer, syllables, alignment, totalDuration } = await this.renderToAudioBuffer(text, dialect, options);
 
       // Create audio nodes
       const source = ctx.createBufferSource();
       source.buffer = buffer;
 
+      const startTime = ctx.currentTime;
       const gainNode = ctx.createGain();
-      gainNode.gain.value = options.volume !== undefined ? options.volume : 1.0;
+      const targetVolume = options.volume !== undefined ? options.volume : 1.0;
+      gainNode.gain.setValueAtTime(0, startTime);
+      gainNode.gain.linearRampToValueAtTime(targetVolume, startTime + 0.010);
 
       // Set up analyser node for real-time waveform visualizers
       if (!this.analyserNode) {
@@ -789,31 +831,32 @@ export class HmongAcousticEngine {
       this.analyserNode.connect(ctx.destination);
 
       this.currentSource = source;
+      this.currentGainNode = gainNode;
 
-      // Schedule real-time syllable events for synchronized karaoke-style highlighting
-      const startTime = ctx.currentTime;
-      let runningTime = 0.05; // 50ms initial offset
-      const rate = (options.rate || 1.0) * (options.voice?.speedMultiplier || 1.0);
-
-      syllables.forEach((syl, idx) => {
-        if (!syl.isPunctuation && options.onSyllable) {
-          const sylOffset = runningTime;
-          const timerId = window.setTimeout(() => {
-            if (this.isSpeaking && options.onSyllable) {
-              options.onSyllable(idx, syl);
-            }
-          }, sylOffset * 1000);
-          this.activeTimers.push(timerId);
-        }
-        const durationSec = syl.isPunctuation ? 0.22 : (syl.durationMs / 1000) / rate;
-        runningTime += durationSec + (syl.isPunctuation ? 0.08 : 0.025);
-      });
+      // Schedule exact real-time syllable events using calculated alignment
+      if (options.onSyllable) {
+        alignment.forEach((item) => {
+          if (!item.isPunctuation) {
+            const timerId = window.setTimeout(() => {
+              if (this.isSpeaking && options.onSyllable) {
+                const foundSyl = syllables[item.index] || {
+                  raw: item.token,
+                  clean: item.clean,
+                } as any;
+                options.onSyllable(item.index, foundSyl);
+              }
+            }, Math.max(0, item.timeStartSec * 1000));
+            this.activeTimers.push(timerId);
+          }
+        });
+      }
 
       source.onended = () => {
         this.activeTimers.forEach(id => clearTimeout(id));
         this.activeTimers = [];
         this.isSpeaking = false;
         this.currentSource = null;
+        this.currentGainNode = null;
         if (options.onEnd) options.onEnd();
       };
 

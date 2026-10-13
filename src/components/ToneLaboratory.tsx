@@ -1,24 +1,58 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { HMONG_TONES, HMONG_VOWELS, DIALECT_MAPPINGS, HmongDialect, parseHmongSyllable } from '../engine/hmongPhonology';
 import { hmongTTS, HMONG_VOICE_PROFILES } from '../engine/hmongAudioSynthesizer';
-import { Volume2, Play, Info } from 'lucide-react';
+import { taskCoordinator } from '../engine/taskCoordinator';
+import { InteractivePitchContourVisualizer } from './InteractivePitchContourVisualizer';
+import { ToneComparisonTrainer } from './ToneComparisonTrainer';
+import { ToneGuideModal } from './ToneGuideModal';
+import { Volume2, Play, Info, BookOpen, Mic, Activity, Layers } from 'lucide-react';
 
 export const ToneLaboratory: React.FC = () => {
   const [testWord, setTestWord] = useState('los');
   const [selectedDialect, setSelectedDialect] = useState<HmongDialect>('dawb');
   const [activeAuditionTone, setActiveAuditionTone] = useState<string | null>(null);
+  const [visualizerFocusTone, setVisualizerFocusTone] = useState<string>('b');
+  const [isToneGuideOpen, setIsToneGuideOpen] = useState<boolean>(false);
+  const [activeToneLabTab, setActiveToneLabTab] = useState<'trainer' | 'synthesizer' | 'both'>('trainer');
+
+  useEffect(() => {
+    const unregister = taskCoordinator.registerStopHandler('tone_laboratory', () => {
+      hmongTTS.stop();
+      setActiveAuditionTone(null);
+    });
+    return () => {
+      unregister();
+      hmongTTS.stop();
+    };
+  }, []);
 
   const decomposed = parseHmongSyllable(testWord, selectedDialect);
 
   const playToneAudition = (toneKey: string, exampleWord: string) => {
+    setVisualizerFocusTone(toneKey);
+    if (activeAuditionTone === toneKey) {
+      hmongTTS.stop();
+      setActiveAuditionTone(null);
+      taskCoordinator.notifyTaskEnded('tone_laboratory');
+      return;
+    }
+
+    taskCoordinator.notifyTaskStarted('tone_laboratory');
     setActiveAuditionTone(toneKey);
-    const voice = HMONG_VOICE_PROFILES[0];
+    const voice = HMONG_VOICE_PROFILES[selectedDialect === 'dawb' ? 0 : 2];
     hmongTTS.speak(exampleWord, selectedDialect, {
       voice,
       rate: 0.85,
       toneEmphasis: 1.3,
       prosody: 1.15,
-      onEnd: () => setActiveAuditionTone(null),
+      onEnd: () => {
+        setActiveAuditionTone(null);
+        taskCoordinator.notifyTaskEnded('tone_laboratory');
+      },
+      onError: () => {
+        setActiveAuditionTone(null);
+        taskCoordinator.notifyTaskEnded('tone_laboratory');
+      },
     });
   };
 
@@ -36,17 +70,108 @@ export const ToneLaboratory: React.FC = () => {
   return (
     <div className="space-y-6">
       {/* Header explanation */}
-      <div>
-        <h2 className="text-lg font-semibold text-slate-100 flex items-center gap-2">
-          <span>Hmong RPA Tone & Phonological System</span>
-        </h2>
-        <p className="text-sm text-slate-400 mt-1 max-w-3xl">
-          In the Romanized Popular Alphabet (RPA), the final consonant of each syllable is not pronounced as a consonant — it encodes the tonal pitch contour and phonation register.
-        </p>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h2 className="text-lg font-semibold text-slate-100 flex items-center gap-2 font-['Syne',sans-serif]">
+            <span>Hmong RPA Tone & Phonological System</span>
+          </h2>
+          <p className="text-sm text-slate-400 mt-1 max-w-2xl">
+            In the Romanized Popular Alphabet (RPA), the final consonant of each syllable is not pronounced as a consonant — it encodes the tonal pitch contour and phonation register.
+          </p>
+        </div>
+        <button
+          onClick={() => setIsToneGuideOpen(true)}
+          className="flex items-center gap-2 px-4 py-2 rounded-xl bg-teal-950/80 hover:bg-teal-900 border border-teal-700/60 text-teal-300 hover:text-white text-xs font-semibold transition shadow-md active:scale-95 shrink-0"
+          title="Open comprehensive guide with IPA, Chao tone numbers, and examples"
+        >
+          <BookOpen className="w-4 h-4 text-teal-400" />
+          <span>Full 8-Tone RPA Guide</span>
+        </button>
       </div>
 
+      {/* Mode Navigation Tabs */}
+      <div className="flex flex-wrap items-center justify-between gap-3 p-1.5 bg-slate-950/80 rounded-2xl border border-slate-800">
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={() => setActiveToneLabTab('trainer')}
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold transition ${
+              activeToneLabTab === 'trainer'
+                ? 'bg-teal-600 text-white shadow-md'
+                : 'text-slate-400 hover:text-white hover:bg-slate-900'
+            }`}
+          >
+            <Mic className="w-3.5 h-3.5 text-amber-300" />
+            <span>Voice Pronunciation Trainer & Pitch Overlay</span>
+            <span className="text-amber-300 font-mono text-[11px]">· Live Mic</span>
+          </button>
+
+          <button
+            onClick={() => setActiveToneLabTab('synthesizer')}
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold transition ${
+              activeToneLabTab === 'synthesizer'
+                ? 'bg-teal-600 text-white shadow-md'
+                : 'text-slate-400 hover:text-white hover:bg-slate-900'
+            }`}
+          >
+            <Activity className="w-3.5 h-3.5 text-teal-300" />
+            <span>Acoustic DSP Pitch Synthesizer</span>
+          </button>
+        </div>
+
+        <button
+          onClick={() => setActiveToneLabTab(activeToneLabTab === 'both' ? 'trainer' : 'both')}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition ${
+            activeToneLabTab === 'both'
+              ? 'bg-purple-950/80 border-purple-500 text-purple-300'
+              : 'border-slate-800 text-slate-400 hover:text-white hover:bg-slate-900'
+          }`}
+          title="Display both the voice pronunciation overlay and the DSP trajectory visualizer together"
+        >
+          <Layers className="w-3.5 h-3.5" />
+          <span>{activeToneLabTab === 'both' ? 'Dual Mode Active' : 'Show Dual View'}</span>
+        </button>
+      </div>
+
+      {/* Interactive Comparison Pronunciation Trainer */}
+      {(activeToneLabTab === 'trainer' || activeToneLabTab === 'both') && (
+        <ToneComparisonTrainer
+          initialTone={visualizerFocusTone}
+          dialect={selectedDialect}
+          onOpenToneGuide={() => setIsToneGuideOpen(true)}
+        />
+      )}
+
+      {/* Interactive Real-Time Pitch-Contour & DSP F0 Trajectory Visualizer */}
+      {(activeToneLabTab === 'synthesizer' || activeToneLabTab === 'both') && (
+        <InteractivePitchContourVisualizer
+          initialTone={visualizerFocusTone}
+          dialect={selectedDialect}
+          onOpenToneGuide={() => setIsToneGuideOpen(true)}
+          onOpenVoiceTrainer={(toneKey) => {
+            setVisualizerFocusTone(toneKey);
+            setActiveToneLabTab('trainer');
+          }}
+        />
+      )}
+
       {/* 8 Tones Interactive Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-slate-200">
+            8 Primary Hmong RPA Tones Reference Cards
+          </h3>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setIsToneGuideOpen(true)}
+              className="text-xs text-teal-400 hover:text-teal-300 font-medium flex items-center gap-1.5 transition"
+            >
+              <BookOpen className="w-3.5 h-3.5" />
+              <span>Full Tone Guide</span>
+            </button>
+            <span className="text-xs text-slate-500">· Click card volume icon to audition</span>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         {Object.entries(HMONG_TONES).map(([key, tone]) => {
           const exWord = toneExamples[key] || 'po';
           const isCurrentActive = activeAuditionTone === key;
@@ -112,6 +237,7 @@ export const ToneLaboratory: React.FC = () => {
             </div>
           );
         })}
+        </div>
       </div>
 
       {/* Syllable Inspector & Sandbox */}
@@ -156,8 +282,11 @@ export const ToneLaboratory: React.FC = () => {
 
           <button
             onClick={() => {
+              taskCoordinator.notifyTaskStarted('tone_laboratory');
               hmongTTS.speak(testWord, selectedDialect, {
                 voice: HMONG_VOICE_PROFILES[selectedDialect === 'dawb' ? 0 : 2],
+                onEnd: () => taskCoordinator.notifyTaskEnded('tone_laboratory'),
+                onError: () => taskCoordinator.notifyTaskEnded('tone_laboratory'),
               });
             }}
             className="flex items-center justify-center gap-2 px-4 py-2 bg-teal-600 hover:bg-teal-500 text-white rounded-lg text-xs font-semibold transition active:scale-95 whitespace-nowrap"
@@ -251,6 +380,19 @@ export const ToneLaboratory: React.FC = () => {
           </table>
         </div>
       </div>
+
+      {/* Tone Guide Modal */}
+      <ToneGuideModal
+        isOpen={isToneGuideOpen}
+        onClose={() => setIsToneGuideOpen(false)}
+        dialect={selectedDialect}
+        onSelectTone={(toneKey) => {
+          setVisualizerFocusTone(toneKey);
+          setIsToneGuideOpen(false);
+          const exWord = toneExamples[toneKey] || 'po';
+          setTestWord(exWord);
+        }}
+      />
     </div>
   );
 };

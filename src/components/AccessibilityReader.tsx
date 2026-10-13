@@ -1,8 +1,9 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { hmongTTS, HMONG_VOICE_PROFILES } from '../engine/hmongAudioSynthesizer';
 import { HmongDialect, parseHmongText, convertDialectText, SyllableDecomposition } from '../engine/hmongPhonology';
 import { speechCoordinator } from '../engine/multilingualCoordinator';
 import { detectLanguage } from '../engine/languageDetector';
+import { taskCoordinator } from '../engine/taskCoordinator';
 import { Play, Square, RotateCcw, Type, Volume2, Sparkles, BookOpen, Globe2, Languages } from 'lucide-react';
 
 const PRESET_STORIES = [
@@ -43,40 +44,58 @@ export const AccessibilityReader: React.FC = () => {
   const detection = useMemo(() => detectLanguage(currentText), [currentText]);
   const syllables = parseHmongText(currentText, dialect);
 
-  const handlePlay = async () => {
-    if (isPlaying) {
-      speechCoordinator.stop();
-      setIsPlaying(false);
-      setActiveSyllableIdx(null);
-      return;
-    }
-
-    setIsPlaying(true);
-    const voice = HMONG_VOICE_PROFILES[dialect === 'dawb' ? 0 : 2];
-
-    await speechCoordinator.speak(currentText, {
-      mode: 'auto',
-      hmongVoice: voice,
-      rate: speed,
-      toneEmphasis: 1.25, // enhanced tone contrast for accessibility
-      onWord: (idx) => {
-        setActiveSyllableIdx(idx);
-      },
-      onEnd: () => {
-        setIsPlaying(false);
-        setActiveSyllableIdx(null);
-      },
-      onError: () => {
-        setIsPlaying(false);
-        setActiveSyllableIdx(null);
-      },
-    });
-  };
-
   const handleStop = () => {
     speechCoordinator.stop();
     setIsPlaying(false);
     setActiveSyllableIdx(null);
+    taskCoordinator.notifyTaskEnded('accessibility_reader');
+  };
+
+  useEffect(() => {
+    const unregister = taskCoordinator.registerStopHandler('accessibility_reader', () => {
+      handleStop();
+    });
+    return () => {
+      unregister();
+      handleStop();
+    };
+  }, []);
+
+  const handlePlay = async () => {
+    if (isPlaying) {
+      handleStop();
+      return;
+    }
+
+    taskCoordinator.notifyTaskStarted('accessibility_reader');
+    setIsPlaying(true);
+    const voice = HMONG_VOICE_PROFILES[dialect === 'dawb' ? 0 : 2];
+
+    try {
+      await speechCoordinator.speak(currentText, {
+        mode: 'auto',
+        hmongVoice: voice,
+        rate: speed,
+        toneEmphasis: 1.25, // enhanced tone contrast for accessibility
+        onWord: (idx) => {
+          setActiveSyllableIdx(idx);
+        },
+        onEnd: () => {
+          setIsPlaying(false);
+          setActiveSyllableIdx(null);
+          taskCoordinator.notifyTaskEnded('accessibility_reader');
+        },
+        onError: () => {
+          setIsPlaying(false);
+          setActiveSyllableIdx(null);
+          taskCoordinator.notifyTaskEnded('accessibility_reader');
+        },
+      });
+    } catch (_) {
+      setIsPlaying(false);
+      setActiveSyllableIdx(null);
+      taskCoordinator.notifyTaskEnded('accessibility_reader');
+    }
   };
 
   return (

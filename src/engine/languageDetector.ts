@@ -31,6 +31,7 @@ const HMONG_CORE_VOCAB_DAWB = new Set([
   'tsaug', 'ntau', 'heev', 'dab', 'tsis', 'qhov', 'twg', 'thaum', 'mob', 'kws', 'kho',
   'noj', 'haus', 'mov', 'dej', 'hmoob', 'lus', 'hais', 'hnov', 'pom', 'paub', 'ntawm',
   'siab', 'nco', 'hlub', 'pab', 'cuam', 'txais', 'qhua', 'tuaj', 'koom', 'ua', 'neeg',
+  'tsiab', 'caug', 'taub', 'hau', 'tos', 'vim', 'ntxhais', 'tub', 'txiv', 'niam',
 ]);
 
 const HMONG_CORE_VOCAB_LEEG = new Set([
@@ -39,7 +40,7 @@ const HMONG_CORE_VOCAB_LEEG = new Set([
   'tsaug', 'ntau', 'heev', 'dlaab', 'tsis', 'qhov', 'twg', 'thau', 'mob', 'kws', 'kho',
   'noj', 'haus', 'moov', 'dleeg', 'moob', 'lug', 'has', 'hnov', 'pum', 'paub', 'ntawd',
   'sab', 'ncu', 'hlub', 'paab', 'cuam', 'txais', 'qhua', 'tuaj', 'koom', 'ua', 'neeg',
-  'dleev', 'dlaag',
+  'dleev', 'dlaag', 'tsiab', 'caug', 'taub', 'hau', 'tos', 'vim', 'nam', 'txiv',
 ]);
 
 // Common English words

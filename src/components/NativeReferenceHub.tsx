@@ -7,14 +7,16 @@
  * with URL input and file upload, and acoustic phonetic calibration.
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Play, Video } from 'lucide-react';
 import { hmongTTS, HMONG_VOICE_PROFILES } from '../engine/hmongAudioSynthesizer';
 import { HmongDialect } from '../engine/hmongPhonology';
+import { taskCoordinator } from '../engine/taskCoordinator';
 import { VideoPlayerHub } from './VideoPlayerHub';
 
 interface NativeReferenceHubProps {
   onUseTranscript?: (text: string) => void;
+  onNavigateToToneLab?: (toneKey?: string) => void;
   dialect?: HmongDialect;
 }
 
@@ -41,11 +43,31 @@ const CITATION_PHRASES = [
 
 export const NativeReferenceHub: React.FC<NativeReferenceHubProps> = ({
   onUseTranscript,
+  onNavigateToToneLab,
   dialect = 'dawb',
 }) => {
   const [activeAudition, setActiveAudition] = useState<number | null>(null);
 
+  useEffect(() => {
+    const unregister = taskCoordinator.registerStopHandler('native_reference', () => {
+      hmongTTS.stop();
+      setActiveAudition(null);
+    });
+    return () => {
+      unregister();
+      hmongTTS.stop();
+    };
+  }, []);
+
   const handleAudition = (idx: number, text: string, targetDialect: HmongDialect = 'dawb') => {
+    if (activeAudition === idx) {
+      hmongTTS.stop();
+      setActiveAudition(null);
+      taskCoordinator.notifyTaskEnded('native_reference');
+      return;
+    }
+
+    taskCoordinator.notifyTaskStarted('native_reference');
     setActiveAudition(idx);
     const voice = HMONG_VOICE_PROFILES[targetDialect === 'dawb' ? 0 : 2];
     hmongTTS.speak(text, targetDialect, {
@@ -53,14 +75,25 @@ export const NativeReferenceHub: React.FC<NativeReferenceHubProps> = ({
       rate: 0.88,
       toneEmphasis: 1.25,
       prosody: 1.15,
-      onEnd: () => setActiveAudition(null),
+      onEnd: () => {
+        setActiveAudition(null);
+        taskCoordinator.notifyTaskEnded('native_reference');
+      },
+      onError: () => {
+        setActiveAudition(null);
+        taskCoordinator.notifyTaskEnded('native_reference');
+      },
     });
   };
 
   return (
     <div className="space-y-8">
       {/* Interactive Video Player & Input URL Component */}
-      <VideoPlayerHub onUseTranscript={onUseTranscript} dialect={dialect} />
+      <VideoPlayerHub
+        onUseTranscript={onUseTranscript}
+        onNavigateToToneLab={onNavigateToToneLab}
+        dialect={dialect}
+      />
 
       {/* Phonetic Citation Soundboard */}
       <div className="p-5 rounded-2xl border border-slate-800 bg-slate-950/80 space-y-4">
