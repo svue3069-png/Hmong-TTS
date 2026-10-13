@@ -38,6 +38,7 @@ import { ThemeColorBackgroundPicker, BackgroundConfig } from './components/Theme
 import { AcousticSettingsHoverGuide } from './components/AcousticSettingsHoverGuide';
 import { FixPronunciationModal } from './components/FixPronunciationModal';
 import { PhrasebookDrawerModal } from './components/PhrasebookDrawerModal';
+import { BatchProcessingTool } from './components/BatchProcessingTool';
 import {
   Play,
   Square,
@@ -59,6 +60,7 @@ import {
   HelpCircle,
   BookOpen,
   Wrench,
+  Layers,
 } from 'lucide-react';
 
 // Preset phrases in White Hmong, Green Hmong, English, and Bilingual Code-Switching
@@ -270,6 +272,9 @@ export default function App() {
 
   // Phrasebook Modal State
   const [isPhrasebookOpen, setIsPhrasebookOpen] = useState(false);
+
+  // Batch Processing Tool Modal State
+  const [isBatchModalOpen, setIsBatchModalOpen] = useState(false);
 
   // Live Reading Window View Mode: 'rpa' (Hmong RPA) | 'respell' (English-friendly respelling) | 'ipa' (IPA Phonetics)
   const [readingDisplayMode, setReadingDisplayMode] = useState<'rpa' | 'respell' | 'ipa'>('rpa');
@@ -775,6 +780,21 @@ export default function App() {
                   <Video className="w-3.5 h-3.5 text-teal-400" />
                   <span>Input Video & URL</span>
                 </button>
+
+                <button
+                  onClick={() => {
+                    taskCoordinator.stopAll('modal_opened');
+                    setIsBatchModalOpen(true);
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-teal-950/80 hover:bg-teal-900 border border-teal-700/70 text-teal-300 transition shadow-xs"
+                  title="Open Batch Processing tool to synthesize multiple sentences and export individual WAVs or concatenated track"
+                >
+                  <Layers className="w-3.5 h-3.5 text-teal-400" />
+                  <span>Batch Processing</span>
+                  <span className="px-1 py-0.2 rounded-full text-[9px] font-bold bg-teal-800 text-teal-200 uppercase">
+                    New
+                  </span>
+                </button>
               </div>
             </div>
 
@@ -902,6 +922,20 @@ export default function App() {
                         >
                           <Sparkles className="w-3.5 h-3.5 text-amber-400" />
                           <span>Fix Pronunciation</span>
+                        </button>
+
+                        {/* Batch Processing Tool Button */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            taskCoordinator.stopAll('modal_opened');
+                            setIsBatchModalOpen(true);
+                          }}
+                          className="px-2.5 py-1 rounded-lg bg-teal-950/80 hover:bg-teal-900/90 text-teal-300 border border-teal-800/80 text-xs font-semibold transition active:scale-95 flex items-center gap-1.5 shadow-sm hover:text-white"
+                          title="Batch Processing: Upload or paste multiple sentences and export individual audio files or a single concatenated track"
+                        >
+                          <Layers className="w-3.5 h-3.5 text-teal-400" />
+                          <span>Batch Processing</span>
                         </button>
 
                         {text.length > 0 && (
@@ -1487,6 +1521,18 @@ export default function App() {
                       >
                         <span>Inspect</span>
                       </button>
+
+                      <button
+                        onClick={() => {
+                          taskCoordinator.stopAll('modal_opened');
+                          setIsBatchModalOpen(true);
+                        }}
+                        className="flex items-center gap-1.5 px-3.5 py-2.5 bg-teal-950/80 hover:bg-teal-900 text-teal-300 hover:text-white rounded-xl text-xs font-semibold border border-teal-700/60 transition active:scale-95 shadow-sm"
+                        title="Open Batch Processing tool to synthesize lists of sentences and export individual or concatenated audio"
+                      >
+                        <Layers className="w-3.5 h-3.5 text-teal-400" />
+                        <span>Batch Processing Tool</span>
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -1861,6 +1907,24 @@ export default function App() {
         }}
         dialect={dialect}
       />
+
+      {/* Batch Processing Studio Modal */}
+      {isBatchModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 md:p-6 bg-black/85 backdrop-blur-md animate-in fade-in duration-200">
+          <div className="w-full max-w-5xl max-h-[95vh] flex flex-col">
+            <BatchProcessingTool
+              onClose={() => setIsBatchModalOpen(false)}
+              onUseSentenceInStudio={(sentence) => {
+                setText(sentence);
+                studioPlayer.clearTrack();
+                setIsBatchModalOpen(false);
+              }}
+              initialDialect={dialect}
+              initialSoundSource={audioSource}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

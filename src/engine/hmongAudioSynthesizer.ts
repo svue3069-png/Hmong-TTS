@@ -923,6 +923,49 @@ export class HmongAcousticEngine {
   }
 
   /**
+   * Concatenates multiple AudioBuffers into a single continuous AudioBuffer
+   * with configurable pause intervals (in seconds) between items.
+   */
+  public concatenateBuffers(buffers: AudioBuffer[], pauseSeconds: number = 0.5): AudioBuffer {
+    const ctx = this.getAudioContext();
+    if (buffers.length === 0) {
+      return ctx.createBuffer(1, 1, 44100);
+    }
+
+    const sampleRate = buffers[0].sampleRate || 44100;
+    const numChannels = Math.max(1, ...buffers.map(b => b.numberOfChannels));
+    const pauseSamples = Math.max(0, Math.round(pauseSeconds * sampleRate));
+
+    let totalLength = 0;
+    for (let i = 0; i < buffers.length; i++) {
+      totalLength += buffers[i].length;
+      if (i < buffers.length - 1) {
+        totalLength += pauseSamples;
+      }
+    }
+
+    const outBuffer = ctx.createBuffer(numChannels, Math.max(1, totalLength), sampleRate);
+
+    for (let ch = 0; ch < numChannels; ch++) {
+      const outData = outBuffer.getChannelData(ch);
+      let offset = 0;
+      for (let i = 0; i < buffers.length; i++) {
+        const inBuffer = buffers[i];
+        const srcChannel = Math.min(ch, inBuffer.numberOfChannels - 1);
+        const inData = inBuffer.getChannelData(srcChannel);
+        outData.set(inData, offset);
+        offset += inData.length;
+        if (i < buffers.length - 1) {
+          // Zero padding (silence)
+          offset += pauseSamples;
+        }
+      }
+    }
+
+    return outBuffer;
+  }
+
+  /**
    * Generates sample-accurate timing and phonetic metadata (IPA and tone alignment).
    */
   public async generateMetadata(
