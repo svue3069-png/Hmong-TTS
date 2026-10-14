@@ -10,6 +10,7 @@
 
 import { HmongDialect, parseHmongText, SyllableDecomposition } from './hmongPhonology';
 import { SyllableAlignmentMetadata } from './hmongAudioSynthesizer';
+import { getWordRecording } from './customWordRecordings';
 
 export interface NativeAudioBatchResult {
   found: boolean;
@@ -105,6 +106,21 @@ export async function preloadNativeWordsBatch(
   for (const w of cleanWords) {
     if (decodedBufferCache.has(w)) {
       resultMap.set(w, decodedBufferCache.get(w)!);
+    }
+  }
+
+  // User-recorded words take priority (and cover words the dictionary lacks)
+  for (const w of [...neededWords]) {
+    try {
+      const blob = await getWordRecording(w);
+      if (blob) {
+        const decoded = await audioCtx.decodeAudioData(await blob.arrayBuffer());
+        decodedBufferCache.set(w, decoded);
+        resultMap.set(w, decoded);
+        neededWords.splice(neededWords.indexOf(w), 1);
+      }
+    } catch {
+      // IndexedDB unavailable or undecodable recording: fall through to the dictionary
     }
   }
 
@@ -673,4 +689,19 @@ export async function assembleNativeHmongTrack(
     totalCount: totalWordsCount,
     coverageRatio,
   };
+}
+
+/** Words in `text` that have neither a dictionary recording nor a user recording. */
+export async function findMissingWords(text: string, dialect: HmongDialect, audioCtx: AudioContext): Promise<string[]> {
+  const words = parseHmongText(text, dialect)
+    .filter((s) => !s.isPunctuation)
+    .map((s) => (s.clean || s.raw).replace(/[^a-zA-Z0-9]/g, '').toLowerCase())
+    .filter(Boolean);
+  const found = await preloadNativeWordsBatch(words, audioCtx);
+  return Array.from(new Set(words)).filter((w) => !found.has(w));
+}
+
+/** Decode and cache a freshly recorded word so the next synthesis uses it immediately. */
+export async function registerRecordedWord(word: string, blob: Blob, audioCtx: AudioContext) {
+  decodedBufferCache.set(word.replace(/[^a-zA-Z0-9]/g, '').toLowerCase(), await audioCtx.decodeAudioData(await blob.arrayBuffer()));
 }
