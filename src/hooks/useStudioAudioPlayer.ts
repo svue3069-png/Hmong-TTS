@@ -12,7 +12,8 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { hmongTTS, HMONG_VOICE_PROFILES, VoiceProfile } from '../engine/hmongAudioSynthesizer';
 import { HmongDialect, parseHmongText, SyllableDecomposition } from '../engine/hmongPhonology';
 import { detectLanguage, DetectionResult } from '../engine/languageDetector';
-import { webSpeech } from '../engine/webSpeechEngine';
+import { renderEnglish } from '../engine/neuralEnglish';
+import { renderMixed } from '../engine/mixedSpeech';
 import { taskCoordinator } from '../engine/taskCoordinator';
 
 export interface AudioTrackMetadata {
@@ -250,15 +251,11 @@ function safelyTeardownAudioElement(audio: HTMLAudioElement | null) {
 
       if (!isEnglish) {
         // Synthesize via native Hmong speech (HmongDictionary.com authentic recorded voice)
+        const renderHmong = (t: string) =>
+          hmongTTS.renderToAudioBuffer(t, dialect, { voice, rate, pitch, toneEmphasis, prosody, audioSource });
+        // English words inside Hmong text are auto-detected and spoken with the English voice
         const { buffer, alignment, totalDuration } =
-          await hmongTTS.renderToAudioBuffer(text, dialect, {
-            voice,
-            rate,
-            pitch,
-            toneEmphasis,
-            prosody,
-            audioSource,
-          });
+          (await renderMixed(text, rate, renderHmong)) ?? (await renderHmong(text));
 
         const wavBlob = hmongTTS.encodeWav(buffer);
         const url = URL.createObjectURL(wavBlob);
@@ -295,30 +292,8 @@ function safelyTeardownAudioElement(audio: HTMLAudioElement | null) {
 
         return newTrack;
       } else {
-        // Fallback or English Web Speech tracking
-        const words = text.split(/\s+/).filter(Boolean);
-        const estDuration = Math.max(1, (words.length * 0.38) / rate);
-
-        // Render synthetic preview tone or prepare timing alignment
-        const syntheticAlignment = words.map((w, idx) => {
-          const start = (idx * 0.38) / rate;
-          const end = ((idx + 1) * 0.38) / rate;
-          return {
-            index: idx,
-            token: w,
-            clean: w.replace(/[^a-zA-Z]/g, ''),
-            timeStartSec: start,
-            timeEndSec: end,
-            durationMs: Math.round(((end - start) * 1000)),
-          };
-        });
-
-        // Synthesize standard speech WAV via hmongTTS or server fallback for consistent audio player
-        const { buffer, alignment } = await hmongTTS.renderToAudioBuffer(text, 'dawb', {
-          voice,
-          rate,
-          pitch,
-        });
+        // English: neural Kokoro voice (the Hmong formant synth cannot pronounce English)
+        const { buffer, durationSec: estDuration, alignment: syntheticAlignment } = await renderEnglish(text, rate);
         const wavBlob = hmongTTS.encodeWav(buffer);
         const url = URL.createObjectURL(wavBlob);
 

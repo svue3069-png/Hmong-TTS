@@ -28,6 +28,7 @@ import { PWAInstallButton } from './components/PWAInstallButton';
 import { ToneLaboratory } from './components/ToneLaboratory';
 import { DeveloperHub } from './components/DeveloperHub';
 import { VoicePackManager } from './components/VoicePackManager';
+import { MissingWordRecorder } from './components/MissingWordRecorder';
 import { AccessibilityReader } from './components/AccessibilityReader';
 import { NativeReferenceHub } from './components/NativeReferenceHub';
 import { MetadataInspectorModal } from './components/MetadataInspectorModal';
@@ -385,6 +386,15 @@ export default function App() {
   });
 
   const isPlaying = studioPlayer.isPlaying;
+
+  // Any text/dialect change (preset, scenario, phrasebook, tone key...) invalidates the loaded track,
+  // so the next play re-synthesizes the new text instead of replaying the old audio.
+  useEffect(() => {
+    const t = studioPlayer.track;
+    if (t && (t.text !== text || (t.engine !== 'web_speech' && t.dialect !== dialect))) {
+      studioPlayer.clearTrack();
+    }
+  }, [text, dialect, studioPlayer.track]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Dynamic language detection on user input
   const detection: DetectionResult = useMemo(() => {
@@ -966,6 +976,8 @@ export default function App() {
                       className="w-full p-3.5 bg-slate-950/90 border border-slate-800 rounded-xl text-slate-100 placeholder:text-slate-600 font-sans text-base focus:outline-hidden focus:border-teal-500 focus:ring-1 focus:ring-teal-500/30 transition resize-y min-h-[110px]"
                     />
                   </div>
+
+                  <MissingWordRecorder text={text} dialect={dialect} />
 
                   {/* Hmong Tone Input Helper Toolbar */}
                   <div className="flex items-center flex-wrap gap-1.5 pt-1 border-t border-slate-800/80">

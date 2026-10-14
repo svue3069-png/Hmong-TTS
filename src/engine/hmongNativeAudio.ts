@@ -10,6 +10,7 @@
 
 import { HmongDialect, parseHmongText, SyllableDecomposition } from './hmongPhonology';
 import { SyllableAlignmentMetadata } from './hmongAudioSynthesizer';
+import { getWordRecording } from './customWordRecordings';
 
 export interface NativeAudioBatchResult {
   found: boolean;
@@ -108,6 +109,21 @@ export async function preloadNativeWordsBatch(
     }
   }
 
+  // User-recorded words take priority (and cover words the dictionary lacks)
+  for (const w of [...neededWords]) {
+    try {
+      const blob = await getWordRecording(w);
+      if (blob) {
+        const decoded = await audioCtx.decodeAudioData(await blob.arrayBuffer());
+        decodedBufferCache.set(w, decoded);
+        resultMap.set(w, decoded);
+        neededWords.splice(neededWords.indexOf(w), 1);
+      }
+    } catch {
+      // IndexedDB unavailable or undecodable recording: fall through to the dictionary
+    }
+  }
+
   if (neededWords.length === 0) {
     return resultMap;
   }
@@ -193,7 +209,7 @@ function getActiveSpeechBounds(buffer: AudioBuffer): AudioTrimBounds {
   }
 
   // Energy threshold: 4% of peak or min 0.008
-  const threshold = Math.max(0.008, peak * 0.04);
+  const threshold = Math.max(0.004, peak * 0.015);
 
   // 16ms protective onset pre-roll to preserve soft consonants (voiceless nasals hm/hn, fricatives s/x/z)
   const onsetMargin = Math.floor(sampleRate * 0.016);
@@ -223,6 +239,21 @@ function getActiveSpeechBounds(buffer: AudioBuffer): AudioTrimBounds {
   const bounds: AudioTrimBounds = { startSample, endSample, activeLength };
   trimBoundsCache.set(buffer, bounds);
   return bounds;
+}
+
+const wordGainCache = new WeakMap<AudioBuffer, number>();
+
+/** Gain that levels each recorded word to a common RMS so stitched speech sounds like one speaker/session. */
+function getWordLoudnessGain(buffer: AudioBuffer, b: AudioTrimBounds): number {
+  const hit = wordGainCache.get(buffer);
+  if (hit !== undefined) return hit;
+  const d = buffer.getChannelData(0);
+  let sum = 0;
+  for (let i = b.startSample; i < b.endSample; i++) sum += d[i] * d[i];
+  const rms = Math.sqrt(sum / Math.max(1, b.endSample - b.startSample));
+  const gain = rms > 1e-4 ? Math.max(0.4, Math.min(2.5, 0.1 / rms)) : 1;
+  wordGainCache.set(buffer, gain);
+  return gain;
 }
 
 interface SyllableProsodyContext {
@@ -384,27 +415,27 @@ export async function assembleNativeHmongTrack(
 
   // Connected conversational Hmong pacing: measured, clear, and articulate
   // Prevents rushing while keeping natural sentence liaison
-  const naturalFlowRate = 1.08 * rate;
+  const naturalFlowRate = rate;
 
   for (let i = 0; i < parsedSyllables.length; i++) {
     const syl = parsedSyllables[i];
 
     if (syl.isPunctuation) {
       const punct = syl.raw;
-      let pauseSec = 0.34; // Default comma / clause pause (340ms)
+      let pauseSec = 0.22; // Default comma / clause pause (340ms)
 
       if (punct === '.' || punct === '。') {
         // STOP AT PERIOD: 780ms clear breath pause for complete sentence closure
-        pauseSec = 0.78;
+        pauseSec = 0.45;
       } else if (punct === '?' || punct === '？') {
         // QUESTION STOP: 750ms interrogative sentence pause
-        pauseSec = 0.75;
+        pauseSec = 0.45;
       } else if (punct === '!' || punct === '！') {
         // EXCLAMATION STOP: 720ms sentence pause
-        pauseSec = 0.72;
+        pauseSec = 0.45;
       } else if (punct === ',' || punct === '，' || punct === ';' || punct === ':') {
         // Minor clause pause
-        pauseSec = 0.34;
+        pauseSec = 0.22;
       } else if (punct === '-') {
         pauseSec = 0.20;
       }
@@ -449,9 +480,9 @@ export async function assembleNativeHmongTrack(
       trimBounds = getActiveSpeechBounds(cached);
 
       // Resampling speed factor considering sample rate conversion, conversational rate, and duration scaling
-      const effectiveRate = naturalFlowRate / durationScale;
-      const rateScale = (cached.sampleRate / sampleRate) * (1 / effectiveRate);
-      segLengthSamples = Math.floor(trimBounds.activeLength / rateScale);
+      // Recordings play at native speed: stretching by resampling would shift the pitch and
+      // distort the tone contour. Only the user's explicit rate (and sample-rate conversion) applies.
+      segLengthSamples = Math.floor(trimBounds.activeLength * (sampleRate / cached.sampleRate) / rate);
       segDurationSec = segLengthSamples / sampleRate;
     } else {
       // Missing from dictionary: fallback to acoustic syllable duration estimate
@@ -481,7 +512,7 @@ export async function assembleNativeHmongTrack(
     if (nextSyl && !nextSyl.isPunctuation) {
       const isCompound = prosodyCtx?.isCompoundWithNext;
       // Overlap adjacent words by 14ms to 18ms so human voice flows continuously like one breath stream
-      const crossfadeOverlapSec = (isCompound ? 0.020 : 0.016) / rate;
+      const crossfadeOverlapSec = (isCompound ? 0.014 : 0.012) / rate;
       const overlapSamples = Math.floor(sampleRate * crossfadeOverlapSec);
       currentSampleOffset = Math.max(0, currentSampleOffset - overlapSamples);
     }
@@ -499,28 +530,27 @@ export async function assembleNativeHmongTrack(
 
     if (seg.isNative && seg.audioBuffer && seg.trimBounds) {
       const srcData = seg.audioBuffer.getChannelData(0);
-      const srcSampleRate = seg.audioBuffer.sampleRate;
       const bounds = seg.trimBounds;
 
       // High-fidelity speech interpolation that preserves natural human vocal tract formants:
       // Advances through the complete active speech bounds without premature cutoffs or truncation
       const numSamplesToWrite = seg.lengthSamples;
       const effectiveLength = Math.max(1, numSamplesToWrite);
-      const totalSrcSamples = bounds.activeLength * (srcSampleRate / sampleRate);
+      const wordGain = getWordLoudnessGain(seg.audioBuffer, bounds);
 
       // Sentence intonational dynamics: sentence starts with higher projection (+1.2 dB), decays smoothly
       const sentDynamics = Math.max(0.78, Math.min(1.15, 1.0 + seg.f0ShiftSemitones * 0.045));
 
       // Raised-cosine windowing for smooth legato inter-word liaison without clicks
       const attackSamples = Math.max(48, Math.min(Math.floor(sampleRate * 0.012), Math.floor(numSamplesToWrite * 0.08)));
-      const releaseSamples = Math.max(64, Math.min(Math.floor(sampleRate * 0.024), Math.floor(numSamplesToWrite * 0.12)));
+      const releaseSamples = attackSamples; // equal ramps sum to unity across the word overlap
 
       for (let j = 0; j < numSamplesToWrite; j++) {
         const outIdx = seg.startSample + j;
         if (outIdx >= outData.length) break;
 
         const progress = j / effectiveLength;
-        const srcPos = bounds.startSample + progress * totalSrcSamples;
+        const srcPos = bounds.startSample + progress * bounds.activeLength;
         const srcIdx = Math.floor(srcPos);
         const frac = srcPos - srcIdx;
 
@@ -549,7 +579,7 @@ export async function assembleNativeHmongTrack(
           }
         }
 
-        outData[outIdx] += sample * 0.92 * sentDynamics;
+        outData[outIdx] += sample * 0.92 * sentDynamics * wordGain;
       }
     } else if (options.fallbackSynthesizer) {
       // Synthesize missing syllable via fallback DSP
@@ -659,4 +689,19 @@ export async function assembleNativeHmongTrack(
     totalCount: totalWordsCount,
     coverageRatio,
   };
+}
+
+/** Words in `text` that have neither a dictionary recording nor a user recording. */
+export async function findMissingWords(text: string, dialect: HmongDialect, audioCtx: AudioContext): Promise<string[]> {
+  const words = parseHmongText(text, dialect)
+    .filter((s) => !s.isPunctuation)
+    .map((s) => (s.clean || s.raw).replace(/[^a-zA-Z0-9]/g, '').toLowerCase())
+    .filter(Boolean);
+  const found = await preloadNativeWordsBatch(words, audioCtx);
+  return Array.from(new Set(words)).filter((w) => !found.has(w));
+}
+
+/** Decode and cache a freshly recorded word so the next synthesis uses it immediately. */
+export async function registerRecordedWord(word: string, blob: Blob, audioCtx: AudioContext) {
+  decodedBufferCache.set(word.replace(/[^a-zA-Z0-9]/g, '').toLowerCase(), await audioCtx.decodeAudioData(await blob.arrayBuffer()));
 }
