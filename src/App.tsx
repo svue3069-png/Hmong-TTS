@@ -387,6 +387,15 @@ export default function App() {
 
   const isPlaying = studioPlayer.isPlaying;
 
+  // Any text/dialect change (preset, scenario, phrasebook, tone key...) invalidates the loaded track,
+  // so the next play re-synthesizes the new text instead of replaying the old audio.
+  useEffect(() => {
+    const t = studioPlayer.track;
+    if (t && (t.text !== text || (t.engine !== 'web_speech' && t.dialect !== dialect))) {
+      studioPlayer.clearTrack();
+    }
+  }, [text, dialect, studioPlayer.track]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Dynamic language detection on user input
   const detection: DetectionResult = useMemo(() => {
     return detectLanguage(text);
