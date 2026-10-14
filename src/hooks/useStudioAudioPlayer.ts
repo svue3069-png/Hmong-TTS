@@ -13,6 +13,7 @@ import { hmongTTS, HMONG_VOICE_PROFILES, VoiceProfile } from '../engine/hmongAud
 import { HmongDialect, parseHmongText, SyllableDecomposition } from '../engine/hmongPhonology';
 import { detectLanguage, DetectionResult } from '../engine/languageDetector';
 import { renderEnglish } from '../engine/neuralEnglish';
+import { renderMixed } from '../engine/mixedSpeech';
 import { taskCoordinator } from '../engine/taskCoordinator';
 
 export interface AudioTrackMetadata {
@@ -250,15 +251,11 @@ function safelyTeardownAudioElement(audio: HTMLAudioElement | null) {
 
       if (!isEnglish) {
         // Synthesize via native Hmong speech (HmongDictionary.com authentic recorded voice)
+        const renderHmong = (t: string) =>
+          hmongTTS.renderToAudioBuffer(t, dialect, { voice, rate, pitch, toneEmphasis, prosody, audioSource });
+        // English words inside Hmong text are auto-detected and spoken with the English voice
         const { buffer, alignment, totalDuration } =
-          await hmongTTS.renderToAudioBuffer(text, dialect, {
-            voice,
-            rate,
-            pitch,
-            toneEmphasis,
-            prosody,
-            audioSource,
-          });
+          (await renderMixed(text, rate, renderHmong)) ?? (await renderHmong(text));
 
         const wavBlob = hmongTTS.encodeWav(buffer);
         const url = URL.createObjectURL(wavBlob);
