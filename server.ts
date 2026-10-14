@@ -8,6 +8,7 @@
 
 import express, { Request, Response } from 'express';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
@@ -23,7 +24,24 @@ const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 const isDev = process.env.NODE_ENV !== 'production';
 
-app.use(express.json({ limit: '50mb' }));
+app.use(express.json({ limit: '15mb' }));
+
+// Minimal per-IP rate limiter (in-memory) for expensive / write endpoints
+// ponytail: single-process only; use a shared store if scaled out
+const hits = new Map<string, number[]>();
+const rateLimit = (max: number, windowMs = 60_000) => (req: Request, res: Response, next: () => void) => {
+  const now = Date.now();
+  const recent = (hits.get(req.ip || '') || []).filter((t) => now - t < windowMs);
+  if (recent.length >= max) return res.status(429).json({ error: 'Too many requests, slow down.' });
+  recent.push(now);
+  hits.set(req.ip || '', recent);
+  next();
+};
+
+// Native-speaker recordings of words missing from HmongDictionary.com, shared across devices
+const CUSTOM_DIR = path.resolve(__dirname, 'data', 'custom-words');
+fs.mkdirSync(CUSTOM_DIR, { recursive: true });
+const customPath = (word: string) => path.join(CUSTOM_DIR, `${word.replace(/[^a-z0-9]/g, '')}.bin`);
 
 const ai = new GoogleGenAI();
 
@@ -112,6 +130,9 @@ async function fetchNativeAudioBuffer(cleanWord: string, retries = 1): Promise<B
     return nativeAudioCache.get(key)!;
   }
 
+  const custom = customPath(key);
+  if (fs.existsSync(custom)) return fs.readFileSync(custom);
+
   // De-duplicate parallel in-flight requests for the exact same word
   if (inFlightAudioRequests.has(key)) {
     return inFlightAudioRequests.get(key)!;
@@ -196,6 +217,16 @@ setTimeout(() => {
   prewarmCommonAudio().catch(() => {});
 }, 1000);
 
+app.post('/api/audio/custom/:word', rateLimit(30), express.raw({ type: '*/*', limit: '2mb' }), (req: Request, res: Response) => {
+  const word = (req.params.word || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+  if (!word || !Buffer.isBuffer(req.body) || req.body.length < 100) {
+    return res.status(400).json({ error: 'Invalid word or audio' });
+  }
+  fs.writeFileSync(customPath(word), req.body);
+  nativeAudioCache.delete(word);
+  return res.json({ status: 'saved', word });
+});
+
 // Native Hmong Audio Proxy: Stream single word MP3
 app.get('/api/audio/hmong-word/:word', async (req: Request, res: Response) => {
   try {
@@ -215,7 +246,7 @@ app.get('/api/audio/hmong-word/:word', async (req: Request, res: Response) => {
     res.setHeader('Content-Length', buffer.length.toString());
     return res.send(buffer);
   } catch (err: any) {
-    return res.status(500).json({ error: err.message });
+    return res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -265,7 +296,7 @@ app.post('/api/audio/hmong-batch', async (req: Request, res: Response) => {
       results,
     });
   } catch (err: any) {
-    return res.status(500).json({ error: err.message });
+    return res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -307,7 +338,7 @@ app.post('/api/tts/phonemize', (req: Request, res: Response) => {
       })),
     });
   } catch (err: any) {
-    return res.status(500).json({ error: err.message });
+    return res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -400,7 +431,7 @@ app.post('/api/tts/metadata', (req: Request, res: Response) => {
       alignment,
     });
   } catch (err: any) {
-    return res.status(500).json({ error: err.message });
+    return res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -424,7 +455,7 @@ app.post('/api/tts/detect', (req: Request, res: Response) => {
       tokens: result.tokens,
     });
   } catch (err: any) {
-    return res.status(500).json({ error: err.message });
+    return res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -516,12 +547,12 @@ app.post('/api/tts/synthesize', (req: Request, res: Response) => {
       })),
     });
   } catch (err: any) {
-    return res.status(500).json({ error: err.message });
+    return res.status(500).json({ error: 'Internal server error' });
   }
 });
 
 // AI Audio Transcription endpoint (Hmong RPA & English speech-to-text)
-app.post('/api/tts/transcribe', async (req: Request, res: Response) => {
+app.post('/api/tts/transcribe', rateLimit(10), async (req: Request, res: Response) => {
   try {
     const { audioData, mimeType = 'audio/webm', dialectHint = 'dawb' } = req.body;
 
@@ -593,7 +624,7 @@ Rules:
   } catch (err: any) {
     console.error('Transcription error in /api/tts/transcribe:', err);
     return res.status(500).json({
-      error: err.message || 'Failed to transcribe audio clip',
+      error: 'Failed to transcribe audio clip',
     });
   }
 });

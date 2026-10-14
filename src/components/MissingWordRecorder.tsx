@@ -30,6 +30,7 @@ export function MissingWordRecorder({ text, dialect }: { text: string; dialect: 
         try {
           await registerRecordedWord(word, blob, getCtx());
           await saveWordRecording(word, blob);
+          fetch(`/api/audio/custom/${encodeURIComponent(word)}`, { method: 'POST', body: blob }).catch(() => {}); // share across devices; local copy is the fallback
           setMissing((m) => m && m.filter((w) => w !== word));
         } catch {
           setError(`Could not save "${word}" - try recording again.`);
