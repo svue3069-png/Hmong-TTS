@@ -388,14 +388,6 @@ export default function App() {
 
   const isPlaying = studioPlayer.isPlaying;
 
-  // Any text/dialect change (preset, scenario, phrasebook, tone key...) invalidates the loaded track,
-  // so the next play re-synthesizes the new text instead of replaying the old audio.
-  useEffect(() => {
-    const t = studioPlayer.track;
-    if (t && (t.text !== text || (t.engine !== 'web_speech' && t.dialect !== dialect))) {
-      studioPlayer.clearTrack();
-    }
-  }, [text, dialect, studioPlayer.track]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Dynamic language detection on user input
   const detection: DetectionResult = useMemo(() => {
@@ -411,6 +403,15 @@ export default function App() {
 
   // Current Hmong Voice
   const currentVoice = HMONG_VOICE_PROFILES.find(v => v.id === selectedVoiceId) || HMONG_VOICE_PROFILES[0];
+
+  // Any change to the text or to a setting that shapes the audio (voice source, voice, speed, pitch,
+  // tone, prosody, engine mode, dialect) invalidates the loaded track, so the next play re-synthesizes
+  // instead of replaying stale audio.
+  const synthKey = JSON.stringify([text, dialect, audioSource, engineMode, currentVoice.id, rate, pitch, toneEmphasis, prosody]);
+  const loadedKeyRef = React.useRef('');
+  useEffect(() => {
+    if (studioPlayer.track && loadedKeyRef.current !== synthKey) studioPlayer.clearTrack();
+  }, [synthKey, studioPlayer.track]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Syllables or words for synchronized karaoke display with English-friendly respellings and IPA
   const displayTokens = useMemo(() => {
@@ -473,6 +474,7 @@ export default function App() {
 
     if (!text.trim()) return;
 
+    loadedKeyRef.current = synthKey;
     const newTrack = await studioPlayer.loadTrack(text, dialect, {
       voice: currentVoice,
       rate,
@@ -1610,34 +1612,6 @@ export default function App() {
                       </div>
                     </button>
 
-                    <button
-                      type="button"
-                      onClick={() => setAudioSource('hmong_dsp')}
-                      className={`p-2.5 rounded-xl border text-left transition flex items-start justify-between gap-2.5 ${
-                        audioSource === 'hmong_dsp'
-                          ? 'bg-teal-950/70 border-teal-500 text-white shadow-lg ring-1 ring-teal-500/40'
-                          : 'bg-slate-950/60 border-slate-800 text-slate-300 hover:border-slate-700'
-                      }`}
-                    >
-                      <div className="space-y-0.5">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-semibold text-slate-200">⚡ Offline Formant Synthesizer</span>
-                          {audioSource === 'hmong_dsp' && (
-                            <span className="text-[9px] font-bold uppercase bg-teal-500 text-slate-950 px-1.5 py-0.5 rounded">
-                              Active
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-[11px] text-slate-400 leading-relaxed">
-                          Pure client-side acoustic DSP pipeline modeling glottal pulses and formant resonators.
-                        </p>
-                      </div>
-                      <div className={`w-4 h-4 rounded-full border mt-0.5 shrink-0 flex items-center justify-center ${
-                        audioSource === 'hmong_dsp' ? 'border-teal-400 bg-teal-400 text-slate-950' : 'border-slate-700'
-                      }`}>
-                        {audioSource === 'hmong_dsp' && <Check className="w-3 h-3 stroke-[3]" />}
-                      </div>
-                    </button>
 
                     <button
                       type="button"

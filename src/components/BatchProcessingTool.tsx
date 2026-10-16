@@ -1008,27 +1008,6 @@ export const BatchProcessingTool: React.FC<BatchProcessingToolProps> = ({
                     )}
                   </button>
 
-                  <button
-                    type="button"
-                    onClick={() => setSoundSource('hmong_dsp')}
-                    className={`p-2.5 rounded-xl border text-left transition flex items-start justify-between gap-2 ${
-                      soundSource === 'hmong_dsp'
-                        ? 'bg-teal-950/70 border-teal-500 text-white shadow-sm ring-1 ring-teal-500/40'
-                        : 'bg-slate-900/60 border-slate-800 text-slate-300 hover:border-slate-700'
-                    }`}
-                  >
-                    <div className="space-y-0.5">
-                      <div className="text-xs font-bold text-white flex items-center gap-1.5">
-                        <span>⚡ Offline Formant Synthesizer</span>
-                      </div>
-                      <p className="text-[10px] text-slate-400">
-                        Pure client-side acoustic DSP modeling glottal flow.
-                      </p>
-                    </div>
-                    {soundSource === 'hmong_dsp' && (
-                      <Check className="w-4 h-4 text-teal-400 shrink-0" />
-                    )}
-                  </button>
                 </div>
 
                 {/* Voice Profile Picker */}
