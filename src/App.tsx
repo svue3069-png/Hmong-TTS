@@ -388,14 +388,6 @@ export default function App() {
 
   const isPlaying = studioPlayer.isPlaying;
 
-  // Any text/dialect change (preset, scenario, phrasebook, tone key...) invalidates the loaded track,
-  // so the next play re-synthesizes the new text instead of replaying the old audio.
-  useEffect(() => {
-    const t = studioPlayer.track;
-    if (t && (t.text !== text || (t.engine !== 'web_speech' && t.dialect !== dialect))) {
-      studioPlayer.clearTrack();
-    }
-  }, [text, dialect, studioPlayer.track]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Dynamic language detection on user input
   const detection: DetectionResult = useMemo(() => {
@@ -411,6 +403,15 @@ export default function App() {
 
   // Current Hmong Voice
   const currentVoice = HMONG_VOICE_PROFILES.find(v => v.id === selectedVoiceId) || HMONG_VOICE_PROFILES[0];
+
+  // Any change to the text or to a setting that shapes the audio (voice source, voice, speed, pitch,
+  // tone, prosody, engine mode, dialect) invalidates the loaded track, so the next play re-synthesizes
+  // instead of replaying stale audio.
+  const synthKey = JSON.stringify([text, dialect, audioSource, engineMode, currentVoice.id, rate, pitch, toneEmphasis, prosody]);
+  const loadedKeyRef = React.useRef('');
+  useEffect(() => {
+    if (studioPlayer.track && loadedKeyRef.current !== synthKey) studioPlayer.clearTrack();
+  }, [synthKey, studioPlayer.track]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Syllables or words for synchronized karaoke display with English-friendly respellings and IPA
   const displayTokens = useMemo(() => {
@@ -473,6 +474,7 @@ export default function App() {
 
     if (!text.trim()) return;
 
+    loadedKeyRef.current = synthKey;
     const newTrack = await studioPlayer.loadTrack(text, dialect, {
       voice: currentVoice,
       rate,
