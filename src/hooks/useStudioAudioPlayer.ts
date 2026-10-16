@@ -8,6 +8,7 @@
  * Hmong syllable karaoke synchronization.
  */
 
+import type { AudioSource } from '../engine/hmongAudioSynthesizer';
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { hmongTTS, HMONG_VOICE_PROFILES, VoiceProfile } from '../engine/hmongAudioSynthesizer';
 import { HmongDialect, parseHmongText, SyllableDecomposition } from '../engine/hmongPhonology';
@@ -20,8 +21,8 @@ export interface AudioTrackMetadata {
   id: string;
   text: string;
   dialect: HmongDialect;
-  engine: 'hmong_dsp' | 'web_speech' | 'hmongdictionary_native';
-  audioSource?: 'hmongdictionary_native' | 'hmong_dsp';
+  engine: 'hmong_dsp' | 'web_speech' | 'hmongdictionary_native' | 'orpheus_neural';
+  audioSource?: AudioSource;
   voice: VoiceProfile;
   url: string;
   blob?: Blob;
@@ -229,7 +230,7 @@ function safelyTeardownAudioElement(audio: HTMLAudioElement | null) {
       pitch?: number;
       toneEmphasis?: number;
       prosody?: number;
-      audioSource?: 'hmongdictionary_native' | 'hmong_dsp';
+      audioSource?: AudioSource;
       engineMode?: 'auto' | 'hmong_dawb' | 'hmong_leeg' | 'english';
     } = {}
   ): Promise<AudioTrackMetadata | null> => {
@@ -264,7 +265,7 @@ function safelyTeardownAudioElement(audio: HTMLAudioElement | null) {
           id: `track_${Date.now()}`,
           text,
           dialect,
-          engine: audioSource === 'hmongdictionary_native' ? 'hmongdictionary_native' : 'hmong_dsp',
+          engine: audioSource === 'hmongdictionary_native' || audioSource === 'orpheus_neural' ? audioSource : 'hmong_dsp',
           audioSource,
           voice,
           url,
