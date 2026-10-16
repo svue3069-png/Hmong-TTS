@@ -30,6 +30,7 @@ import { ToneLaboratory } from './components/ToneLaboratory';
 import { DeveloperHub } from './components/DeveloperHub';
 import { VoicePackManager } from './components/VoicePackManager';
 import { MissingWordRecorder } from './components/MissingWordRecorder';
+import { isOrpheusAvailable } from './engine/orpheusHmong';
 import { AccessibilityReader } from './components/AccessibilityReader';
 import { NativeReferenceHub } from './components/NativeReferenceHub';
 import { MetadataInspectorModal } from './components/MetadataInspectorModal';
@@ -198,6 +199,11 @@ export default function App() {
   const [currentWordIdx, setCurrentWordIdx] = useState<number | null>(null);
   const [activeEngine, setActiveEngine] = useState<ActiveEngineType>('hmongdictionary_native');
   const [audioSource, setAudioSource] = useState<AudioSource>('hmongdictionary_native');
+
+  // Prefer the neural voice (much more natural than stitched word recordings) whenever its server is running.
+  useEffect(() => {
+    isOrpheusAvailable().then((ok) => ok && setAudioSource('orpheus_neural'));
+  }, []);
   const [isExporting, setIsExporting] = useState<boolean>(false);
   const [isExportingMetadata, setIsExportingMetadata] = useState<boolean>(false);
   const [isMetadataModalOpen, setIsMetadataModalOpen] = useState<boolean>(false);

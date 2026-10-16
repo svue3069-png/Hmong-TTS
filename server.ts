@@ -9,6 +9,7 @@
 import express, { Request, Response } from 'express';
 import path from 'path';
 import fs from 'fs';
+import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
@@ -229,6 +230,8 @@ app.post('/api/audio/custom/:word', rateLimit(30), express.raw({ type: '*/*', li
 
 // Optional neural Hmong backend: proxy to the local Orpheus sidecar (neural/orpheus_server.py)
 const ORPHEUS_URL = process.env.ORPHEUS_URL || 'http://127.0.0.1:8765';
+const ORPHEUS_CACHE = path.resolve(__dirname, 'data', 'orpheus-cache');
+fs.mkdirSync(ORPHEUS_CACHE, { recursive: true });
 
 app.get('/api/tts/neural/status', async (_req: Request, res: Response) => {
   try {
@@ -242,6 +245,13 @@ app.get('/api/tts/neural/status', async (_req: Request, res: Response) => {
 app.post('/api/tts/neural', rateLimit(20), async (req: Request, res: Response) => {
   const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
   if (!text || text.length > 300) return res.status(400).json({ error: 'text must be 1-300 characters' });
+
+  // Generation is slow on CPU and varies run to run, so every sentence is generated once and cached on disk.
+  const file = path.join(ORPHEUS_CACHE, crypto.createHash('sha256').update(text).digest('hex') + '.wav');
+  if (fs.existsSync(file)) {
+    res.setHeader('Content-Type', 'audio/wav');
+    return res.send(fs.readFileSync(file));
+  }
   try {
     const r = await fetch(`${ORPHEUS_URL}/synthesize`, {
       method: 'POST',
@@ -250,8 +260,10 @@ app.post('/api/tts/neural', rateLimit(20), async (req: Request, res: Response) =
       signal: AbortSignal.timeout(10 * 60_000), // CPU generation is slow
     });
     if (!r.ok) return res.status(502).json({ error: 'Neural backend failed' });
+    const wav = Buffer.from(await r.arrayBuffer());
+    fs.writeFileSync(file, wav);
     res.setHeader('Content-Type', 'audio/wav');
-    return res.send(Buffer.from(await r.arrayBuffer()));
+    return res.send(wav);
   } catch {
     return res.status(503).json({ error: 'Neural backend not running' });
   }
