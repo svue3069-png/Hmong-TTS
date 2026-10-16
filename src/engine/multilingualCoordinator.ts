@@ -7,13 +7,13 @@
  * to either the native HmongTTS acoustic engine or the browser Web Speech API.
  */
 
-import { hmongTTS, HMONG_VOICE_PROFILES, VoiceProfile } from './hmongAudioSynthesizer';
+import { hmongTTS, HMONG_VOICE_PROFILES, VoiceProfile, AudioSource } from './hmongAudioSynthesizer';
 import { webSpeech, WebSpeechOptions } from './webSpeechEngine';
 import { detectLanguage, DetectionResult, DetectedLanguage } from './languageDetector';
 import { HmongDialect, parseHmongText, SyllableDecomposition } from './hmongPhonology';
 
 export type SpeechEngineMode = 'auto' | 'hmong_dawb' | 'hmong_leeg' | 'english';
-export type ActiveEngineType = 'hmong_dsp' | 'web_speech' | 'hmongdictionary_native';
+export type ActiveEngineType = 'hmong_dsp' | 'web_speech' | 'hmongdictionary_native' | 'orpheus_neural';
 
 export interface MultilingualSpeechOptions {
   mode?: SpeechEngineMode;
@@ -23,7 +23,7 @@ export interface MultilingualSpeechOptions {
   toneEmphasis?: number;
   prosody?: number;
   volume?: number;
-  audioSource?: 'hmongdictionary_native' | 'hmong_dsp';
+  audioSource?: AudioSource;
   onStart?: (engine: ActiveEngineType, detected: DetectionResult) => void;
   onWord?: (index: number, token: string, engine: ActiveEngineType) => void;
   onEnd?: () => void;

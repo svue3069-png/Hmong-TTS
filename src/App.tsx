@@ -6,6 +6,7 @@
  * With Intelligent Multilingual Auto-Detect (Hmong vs English) & Dynamic Cultural Themes
  */
 
+import type { AudioSource } from './engine/hmongAudioSynthesizer';
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   hmongTTS,
@@ -196,7 +197,7 @@ export default function App() {
   const [prosody, setProsody] = useState<number>(1.1);
   const [currentWordIdx, setCurrentWordIdx] = useState<number | null>(null);
   const [activeEngine, setActiveEngine] = useState<ActiveEngineType>('hmongdictionary_native');
-  const [audioSource, setAudioSource] = useState<'hmongdictionary_native' | 'hmong_dsp'>('hmongdictionary_native');
+  const [audioSource, setAudioSource] = useState<AudioSource>('hmongdictionary_native');
   const [isExporting, setIsExporting] = useState<boolean>(false);
   const [isExportingMetadata, setIsExportingMetadata] = useState<boolean>(false);
   const [isMetadataModalOpen, setIsMetadataModalOpen] = useState<boolean>(false);
@@ -405,7 +406,7 @@ export default function App() {
   const resolvedEngine: ActiveEngineType = useMemo(() => {
     if (engineMode === 'english') return 'web_speech';
     if (detection.language === 'english' && engineMode === 'auto') return 'web_speech';
-    return audioSource === 'hmongdictionary_native' ? 'hmongdictionary_native' : 'hmong_dsp';
+    return audioSource === 'hmongdictionary_native' || audioSource === 'orpheus_neural' ? audioSource : 'hmong_dsp';
   }, [engineMode, detection.language, audioSource]);
 
   // Current Hmong Voice
@@ -1635,6 +1636,35 @@ export default function App() {
                         audioSource === 'hmong_dsp' ? 'border-teal-400 bg-teal-400 text-slate-950' : 'border-slate-700'
                       }`}>
                         {audioSource === 'hmong_dsp' && <Check className="w-3 h-3 stroke-[3]" />}
+                      </div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setAudioSource('orpheus_neural')}
+                      className={`p-2.5 rounded-xl border text-left transition flex items-start justify-between gap-2.5 ${
+                        audioSource === 'orpheus_neural'
+                          ? 'bg-violet-950/70 border-violet-500 text-white shadow-lg ring-1 ring-violet-500/40'
+                          : 'bg-slate-950/60 border-slate-800 text-slate-300 hover:border-slate-700'
+                      }`}
+                    >
+                      <div className="space-y-0.5">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-semibold text-slate-200">🧠 Neural Hmong (Orpheus, experimental)</span>
+                          {audioSource === 'orpheus_neural' && (
+                            <span className="text-[9px] font-bold uppercase bg-violet-500 text-slate-950 px-1.5 py-0.5 rounded">
+                              Active
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-slate-400 leading-relaxed">
+                          Neural voice for unseen words and fluent sentences. Needs the local Orpheus server (see neural/); falls back to recorded words if it is not running. Slow on CPU.
+                        </p>
+                      </div>
+                      <div className={`w-4 h-4 rounded-full border mt-0.5 shrink-0 flex items-center justify-center ${
+                        audioSource === 'orpheus_neural' ? 'border-violet-400 bg-violet-400 text-slate-950' : 'border-slate-700'
+                      }`}>
+                        {audioSource === 'orpheus_neural' && <Check className="w-3 h-3 stroke-[3]" />}
                       </div>
                     </button>
                   </div>

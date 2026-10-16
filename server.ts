@@ -227,6 +227,36 @@ app.post('/api/audio/custom/:word', rateLimit(30), express.raw({ type: '*/*', li
   return res.json({ status: 'saved', word });
 });
 
+// Optional neural Hmong backend: proxy to the local Orpheus sidecar (neural/orpheus_server.py)
+const ORPHEUS_URL = process.env.ORPHEUS_URL || 'http://127.0.0.1:8765';
+
+app.get('/api/tts/neural/status', async (_req: Request, res: Response) => {
+  try {
+    const r = await fetch(`${ORPHEUS_URL}/health`, { signal: AbortSignal.timeout(1500) });
+    return res.json({ available: r.ok });
+  } catch {
+    return res.json({ available: false });
+  }
+});
+
+app.post('/api/tts/neural', rateLimit(20), async (req: Request, res: Response) => {
+  const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
+  if (!text || text.length > 300) return res.status(400).json({ error: 'text must be 1-300 characters' });
+  try {
+    const r = await fetch(`${ORPHEUS_URL}/synthesize`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+      signal: AbortSignal.timeout(10 * 60_000), // CPU generation is slow
+    });
+    if (!r.ok) return res.status(502).json({ error: 'Neural backend failed' });
+    res.setHeader('Content-Type', 'audio/wav');
+    return res.send(Buffer.from(await r.arrayBuffer()));
+  } catch {
+    return res.status(503).json({ error: 'Neural backend not running' });
+  }
+});
+
 // Native Hmong Audio Proxy: Stream single word MP3
 app.get('/api/audio/hmong-word/:word', async (req: Request, res: Response) => {
   try {

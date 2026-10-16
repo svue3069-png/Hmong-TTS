@@ -9,6 +9,7 @@
  * track with user-defined pause intervals and synchronized subtitle cues (.srt / .vtt).
  */
 
+import type { AudioSource } from '../engine/hmongAudioSynthesizer';
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { taskCoordinator } from '../engine/taskCoordinator';
 import {
@@ -152,7 +153,7 @@ interface BatchProcessingToolProps {
   onClose?: () => void;
   onUseSentenceInStudio?: (text: string) => void;
   initialDialect?: HmongDialect;
-  initialSoundSource?: 'hmongdictionary_native' | 'hmong_dsp';
+  initialSoundSource?: AudioSource;
 }
 
 export const BatchProcessingTool: React.FC<BatchProcessingToolProps> = ({
@@ -169,7 +170,7 @@ export const BatchProcessingTool: React.FC<BatchProcessingToolProps> = ({
   // Settings
   const [dialect, setDialect] = useState<HmongDialect>(initialDialect);
   const [selectedVoiceId, setSelectedVoiceId] = useState<string>('paj_dawb_female');
-  const [soundSource, setSoundSource] = useState<'hmongdictionary_native' | 'hmong_dsp'>(initialSoundSource);
+  const [soundSource, setSoundSource] = useState<AudioSource>(initialSoundSource);
   const [rate, setRate] = useState<number>(1.0);
   const [pitch, setPitch] = useState<number>(1.0);
   const [pauseIntervalSec, setPauseIntervalSec] = useState<number>(0.6); // Pause between concatenated sentences

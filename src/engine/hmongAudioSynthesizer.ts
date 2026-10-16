@@ -15,6 +15,9 @@ import {
 } from './hmongPhonology';
 import { applyNativeProsody } from './nativePronunciation';
 import { assembleNativeHmongTrack } from './hmongNativeAudio';
+import { renderOrpheus } from './orpheusHmong';
+
+export type AudioSource = 'hmongdictionary_native' | 'hmong_dsp' | 'orpheus_neural';
 
 export interface SyllableAlignmentMetadata {
   index: number;
@@ -179,7 +182,7 @@ export interface SynthesisOptions {
   volume?: number; // 0.0 - 1.0
   toneEmphasis?: number; // 0.8 - 1.6
   prosody?: number; // 0.0 (rigid metronome) to 2.0 (expressive human rubato & pitch micro-variation)
-  audioSource?: 'hmongdictionary_native' | 'hmong_dsp';
+  audioSource?: AudioSource;
   onStart?: () => void;
   onSyllable?: (index: number, syllable: SyllableDecomposition) => void;
   onEnd?: () => void;
@@ -289,6 +292,16 @@ export class HmongAcousticEngine {
       wordCounter++;
       return opt;
     });
+
+    // 0. Optional neural backend (Orpheus-Hmong sidecar). Unavailable or failing -> fall through to recordings.
+    if (options.audioSource === 'orpheus_neural') {
+      try {
+        const neural = await renderOrpheus(text, dialect, ctx);
+        if (neural) return neural;
+      } catch (err) {
+        console.warn('Orpheus-Hmong unavailable, using recorded words:', err);
+      }
+    }
 
     // 1. Primary Engine: Authentic Native Recorded Audio from HmongDictionary.com & Hmong Voice Archives
     if (options.audioSource !== 'hmong_dsp') {
