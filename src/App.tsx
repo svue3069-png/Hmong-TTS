@@ -1612,34 +1612,6 @@ export default function App() {
                       </div>
                     </button>
 
-                    <button
-                      type="button"
-                      onClick={() => setAudioSource('hmong_dsp')}
-                      className={`p-2.5 rounded-xl border text-left transition flex items-start justify-between gap-2.5 ${
-                        audioSource === 'hmong_dsp'
-                          ? 'bg-teal-950/70 border-teal-500 text-white shadow-lg ring-1 ring-teal-500/40'
-                          : 'bg-slate-950/60 border-slate-800 text-slate-300 hover:border-slate-700'
-                      }`}
-                    >
-                      <div className="space-y-0.5">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-semibold text-slate-200">⚡ Offline Formant Synthesizer</span>
-                          {audioSource === 'hmong_dsp' && (
-                            <span className="text-[9px] font-bold uppercase bg-teal-500 text-slate-950 px-1.5 py-0.5 rounded">
-                              Active
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-[11px] text-slate-400 leading-relaxed">
-                          Pure client-side acoustic DSP pipeline modeling glottal pulses and formant resonators.
-                        </p>
-                      </div>
-                      <div className={`w-4 h-4 rounded-full border mt-0.5 shrink-0 flex items-center justify-center ${
-                        audioSource === 'hmong_dsp' ? 'border-teal-400 bg-teal-400 text-slate-950' : 'border-slate-700'
-                      }`}>
-                        {audioSource === 'hmong_dsp' && <Check className="w-3 h-3 stroke-[3]" />}
-                      </div>
-                    </button>
 
                     <button
                       type="button"
