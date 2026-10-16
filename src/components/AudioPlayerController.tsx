@@ -49,7 +49,7 @@ interface AudioPlayerControllerProps {
   onRenderAndPlay?: () => void;
   hasText?: boolean;
   speakButtonLabel?: string;
-  engineType?: 'hmong_dsp' | 'web_speech' | 'hmongdictionary_native' | 'orpheus_neural';
+  engineType?: 'hmong_dsp' | 'web_speech' | 'hmongdictionary_native' | 'orpheus_neural' | 'nouai_cloud';
 }
 
 export const AudioPlayerController: React.FC<AudioPlayerControllerProps> = ({

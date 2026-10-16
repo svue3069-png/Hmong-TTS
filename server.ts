@@ -9,6 +9,7 @@
 import express, { Request, Response } from 'express';
 import path from 'path';
 import fs from 'fs';
+import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
@@ -254,6 +255,51 @@ app.post('/api/tts/neural', rateLimit(20), async (req: Request, res: Response) =
     return res.send(Buffer.from(await r.arrayBuffer()));
   } catch {
     return res.status(503).json({ error: 'Neural backend not running' });
+  }
+});
+
+// Optional NouAI cloud voice (https://nouai.app): paid REST API, flat 30 credits per call.
+// The key stays on the server; identical requests are served from a disk cache so replays cost nothing.
+const NOUAI_URL = process.env.NOUAI_URL || 'https://nouai.app/api/v1/tts/speak';
+const NOUAI_CACHE = path.resolve(__dirname, 'data', 'nouai-cache');
+fs.mkdirSync(NOUAI_CACHE, { recursive: true });
+
+app.get('/api/tts/nouai/status', (_req: Request, res: Response) => {
+  res.json({ available: Boolean(process.env.NOUAI_API_KEY) });
+});
+
+app.post('/api/tts/nouai', rateLimit(20), async (req: Request, res: Response) => {
+  const key = process.env.NOUAI_API_KEY;
+  if (!key) return res.status(503).json({ error: 'NouAI API key not configured' });
+  const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
+  if (!text || text.length > 4000) return res.status(400).json({ error: 'text must be 1-4000 characters' });
+  const speed = Math.min(2, Math.max(0.5, Number(req.body?.speed) || 1));
+  const model = text.length > 1500 ? 'nouai-speech-v1' : 'nouai-speech-v2';
+  const voice = process.env.NOUAI_VOICE || undefined;
+
+  const file = path.join(NOUAI_CACHE, crypto.createHash('sha256').update(JSON.stringify([model, voice, speed, text])).digest('hex') + '.wav');
+  res.setHeader('Content-Type', 'audio/wav');
+  if (fs.existsSync(file)) return res.send(fs.readFileSync(file));
+
+  try {
+    const r = await fetch(NOUAI_URL, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, model, speed, ...(voice ? { voice } : {}) }),
+      signal: AbortSignal.timeout(120_000),
+    });
+    if (!r.ok) {
+      res.setHeader('Content-Type', 'application/json');
+      if (r.status === 402) return res.status(402).json({ error: 'NouAI credits exhausted' });
+      if (r.status === 429) return res.status(429).json({ error: 'NouAI rate limit reached' });
+      return res.status(502).json({ error: r.status === 401 ? 'NouAI API key rejected' : 'NouAI synthesis failed' });
+    }
+    const buf = Buffer.from(await r.arrayBuffer());
+    fs.writeFileSync(file, buf);
+    return res.send(buf);
+  } catch {
+    res.setHeader('Content-Type', 'application/json');
+    return res.status(502).json({ error: 'NouAI unreachable' });
   }
 });
 

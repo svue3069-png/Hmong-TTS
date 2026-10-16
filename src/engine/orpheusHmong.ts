@@ -20,25 +20,29 @@ export async function isOrpheusAvailable(): Promise<boolean> {
 
 const PAUSE_SEC = 0.3;
 
-export async function renderOrpheus(
+export async function renderRemoteHmong(
+  endpoint: string,
   text: string,
   dialect: HmongDialect,
-  ctx: AudioContext
+  ctx: AudioContext,
+  opts: { perSentence: boolean; speed?: number }
 ): Promise<{
   buffer: AudioBuffer;
   syllables: SyllableDecomposition[];
   alignment: SyllableAlignmentMetadata[];
   totalDuration: number;
 } | null> {
-  const sentences = (text.match(/[^.!?]+[.!?]*/g) ?? []).map((s) => s.trim()).filter(Boolean);
+  const sentences = opts.perSentence
+    ? (text.match(/[^.!?]+[.!?]*/g) ?? []).map((s) => s.trim()).filter(Boolean)
+    : [text.trim()].filter(Boolean);
   if (sentences.length === 0) return null;
 
   const parts: { data: Float32Array; syllables: SyllableDecomposition[] }[] = [];
   for (const s of sentences) {
-    const res = await fetch('/api/tts/neural', {
+    const res = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: s }),
+      body: JSON.stringify({ text: s, speed: opts.speed }),
     });
     if (!res.ok) return null; // sidecar down or failed: caller falls back
     // decodeAudioData resamples the model's 24 kHz output to the context rate
@@ -104,3 +108,11 @@ export async function renderOrpheus(
   }
   return { buffer, syllables, alignment, totalDuration: total / sr };
 }
+
+/** Local Orpheus-Hmong sidecar: short clips, so one request per sentence. */
+export const renderOrpheus = (text: string, dialect: HmongDialect, ctx: AudioContext) =>
+  renderRemoteHmong('/api/tts/neural', text, dialect, ctx, { perSentence: true });
+
+/** NouAI cloud voice: flat price per call, so send the whole text in one request (server caches repeats). */
+export const renderNouai = (text: string, dialect: HmongDialect, ctx: AudioContext, speed = 1) =>
+  renderRemoteHmong('/api/tts/nouai', text, dialect, ctx, { perSentence: false, speed });

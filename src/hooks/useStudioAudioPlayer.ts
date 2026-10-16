@@ -21,7 +21,7 @@ export interface AudioTrackMetadata {
   id: string;
   text: string;
   dialect: HmongDialect;
-  engine: 'hmong_dsp' | 'web_speech' | 'hmongdictionary_native' | 'orpheus_neural';
+  engine: 'hmong_dsp' | 'web_speech' | 'hmongdictionary_native' | 'orpheus_neural' | 'nouai_cloud';
   audioSource?: AudioSource;
   voice: VoiceProfile;
   url: string;
@@ -265,7 +265,7 @@ function safelyTeardownAudioElement(audio: HTMLAudioElement | null) {
           id: `track_${Date.now()}`,
           text,
           dialect,
-          engine: audioSource === 'hmongdictionary_native' || audioSource === 'orpheus_neural' ? audioSource : 'hmong_dsp',
+          engine: audioSource === 'hmongdictionary_native' || audioSource === 'orpheus_neural' || audioSource === 'nouai_cloud' ? audioSource : 'hmong_dsp',
           audioSource,
           voice,
           url,

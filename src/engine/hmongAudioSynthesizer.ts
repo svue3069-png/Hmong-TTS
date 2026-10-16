@@ -15,9 +15,9 @@ import {
 } from './hmongPhonology';
 import { applyNativeProsody } from './nativePronunciation';
 import { assembleNativeHmongTrack } from './hmongNativeAudio';
-import { renderOrpheus } from './orpheusHmong';
+import { renderOrpheus, renderNouai } from './orpheusHmong';
 
-export type AudioSource = 'hmongdictionary_native' | 'hmong_dsp' | 'orpheus_neural';
+export type AudioSource = 'hmongdictionary_native' | 'hmong_dsp' | 'orpheus_neural' | 'nouai_cloud';
 
 export interface SyllableAlignmentMetadata {
   index: number;
@@ -300,6 +300,16 @@ export class HmongAcousticEngine {
         if (neural) return neural;
       } catch (err) {
         console.warn('Orpheus-Hmong unavailable, using recorded words:', err);
+      }
+    }
+
+    // 0b. Optional NouAI cloud voice (needs NOUAI_API_KEY on the server). Failure -> fall through to recordings.
+    if (options.audioSource === 'nouai_cloud') {
+      try {
+        const cloud = await renderNouai(text, dialect, ctx, options.rate);
+        if (cloud) return cloud;
+      } catch (err) {
+        console.warn('NouAI unavailable, using recorded words:', err);
       }
     }
 

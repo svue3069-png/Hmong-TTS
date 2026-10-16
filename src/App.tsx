@@ -398,7 +398,7 @@ export default function App() {
   const resolvedEngine: ActiveEngineType = useMemo(() => {
     if (engineMode === 'english') return 'web_speech';
     if (detection.language === 'english' && engineMode === 'auto') return 'web_speech';
-    return audioSource === 'hmongdictionary_native' || audioSource === 'orpheus_neural' ? audioSource : 'hmong_dsp';
+    return audioSource === 'hmongdictionary_native' || audioSource === 'orpheus_neural' || audioSource === 'nouai_cloud' ? audioSource : 'hmong_dsp';
   }, [engineMode, detection.language, audioSource]);
 
   // Current Hmong Voice
@@ -1612,6 +1612,35 @@ export default function App() {
                       </div>
                     </button>
 
+
+                    <button
+                      type="button"
+                      onClick={() => setAudioSource('nouai_cloud')}
+                      className={`p-2.5 rounded-xl border text-left transition flex items-start justify-between gap-2.5 ${
+                        audioSource === 'nouai_cloud'
+                          ? 'bg-sky-950/70 border-sky-500 text-white shadow-lg ring-1 ring-sky-500/40'
+                          : 'bg-slate-950/60 border-slate-800 text-slate-300 hover:border-slate-700'
+                      }`}
+                    >
+                      <div className="space-y-0.5">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-semibold text-slate-200">☁️ NouAI Cloud Voice (natural, paid)</span>
+                          {audioSource === 'nouai_cloud' && (
+                            <span className="text-[9px] font-bold uppercase bg-sky-500 text-slate-950 px-1.5 py-0.5 rounded">
+                              Active
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-slate-400 leading-relaxed">
+                          Whole-text neural Hmong voice from nouai.app (30 credits per new request; repeats are cached). Your text is sent to NouAI. Needs NOUAI_API_KEY on the server; falls back to recorded words if unavailable.
+                        </p>
+                      </div>
+                      <div className={`w-4 h-4 rounded-full border mt-0.5 shrink-0 flex items-center justify-center ${
+                        audioSource === 'nouai_cloud' ? 'border-sky-400 bg-sky-400 text-slate-950' : 'border-slate-700'
+                      }`}>
+                        {audioSource === 'nouai_cloud' && <Check className="w-3 h-3 stroke-[3]" />}
+                      </div>
+                    </button>
 
                     <button
                       type="button"
