@@ -11,6 +11,7 @@
 import { HmongDialect, parseHmongText, SyllableDecomposition } from './hmongPhonology';
 import { SyllableAlignmentMetadata } from './hmongAudioSynthesizer';
 import { getWordRecording } from './customWordRecordings';
+import { resampleLinear, timeStretch } from './timeStretch';
 
 export interface NativeAudioBatchResult {
   found: boolean;
@@ -174,6 +175,31 @@ const HMONG_COMMON_COMPOUNDS = new Set([
   'nkag_siab', 'tsis_tau', 'tsi_tau', 'yuav_tau', 'muaj_peev_xwm',
 ]);
 
+/**
+ * Dictionary recordings are slow citation-form words (~2.5 words/s), which is what makes stitched speech
+ * sound choppy. Connected speech is faster and reduces small grammar words, so each word is sped up with a
+ * pitch-preserving time stretch (tones are pitch contours and must not move). Sentence-final words stay slow.
+ */
+const FUNCTION_WORDS = new Set([
+  'lub', 'tus', 'cov', 'uas', 'yog', 'tsis', 'tau', 'yuav', 'los', 'rau', 'ntawm', 'li', 'hu', 'ua', 'thiab',
+  'mas', 'ces', 'thiaj', 'kom', 'vim', 'kuv', 'koj', 'nws', 'peb', 'nej', 'lawv', 'no', 'ntawd', 'tuaj', 'mus',
+]);
+const FLOW_CONTENT = 1.3;
+const FLOW_FUNCTION = 1.5;
+const FLOW_FINAL = 1.1;
+
+function flowFactor(word: string, isSentenceFinal: boolean): number {
+  if (isSentenceFinal) return FLOW_FINAL;
+  return FUNCTION_WORDS.has(word) ? FLOW_FUNCTION : FLOW_CONTENT;
+}
+
+/** Active part of a recording, converted to the output rate and stretched (pitch-preserving) to targetLen. */
+function prepareWord(buffer: AudioBuffer, b: AudioTrimBounds, outRate: number, targetLen: number): Float32Array {
+  const region = buffer.getChannelData(0).subarray(b.startSample, b.endSample);
+  const atRate = resampleLinear(region, buffer.sampleRate, outRate);
+  return timeStretch(atRate, targetLen / Math.max(1, atRate.length), outRate);
+}
+
 interface AudioTrimBounds {
   startSample: number;
   endSample: number;
@@ -212,9 +238,9 @@ function getActiveSpeechBounds(buffer: AudioBuffer): AudioTrimBounds {
   const threshold = Math.max(0.004, peak * 0.015);
 
   // 16ms protective onset pre-roll to preserve soft consonants (voiceless nasals hm/hn, fricatives s/x/z)
-  const onsetMargin = Math.floor(sampleRate * 0.016);
+  const onsetMargin = Math.floor(sampleRate * 0.010);
   // 30ms protective release post-roll to preserve vowel off-glides, nasal tails, and tones
-  const releaseMargin = Math.floor(sampleRate * 0.030);
+  const releaseMargin = Math.floor(sampleRate * 0.016);
 
   let firstActive = 0;
   for (let i = 0; i < len; i++) {
@@ -482,7 +508,7 @@ export async function assembleNativeHmongTrack(
       // Resampling speed factor considering sample rate conversion, conversational rate, and duration scaling
       // Recordings play at native speed: stretching by resampling would shift the pitch and
       // distort the tone contour. Only the user's explicit rate (and sample-rate conversion) applies.
-      segLengthSamples = Math.floor(trimBounds.activeLength * (sampleRate / cached.sampleRate) / rate);
+      segLengthSamples = Math.floor(trimBounds.activeLength * (sampleRate / cached.sampleRate) / (rate * flowFactor(cleanWord, isPrePeriod)));
       segDurationSec = segLengthSamples / sampleRate;
     } else {
       // Missing from dictionary: fallback to acoustic syllable duration estimate
@@ -512,7 +538,7 @@ export async function assembleNativeHmongTrack(
     if (nextSyl && !nextSyl.isPunctuation) {
       const isCompound = prosodyCtx?.isCompoundWithNext;
       // Overlap adjacent words by 14ms to 18ms so human voice flows continuously like one breath stream
-      const crossfadeOverlapSec = (isCompound ? 0.014 : 0.012) / rate;
+      const crossfadeOverlapSec = (isCompound ? 0.030 : 0.028) / rate;
       const overlapSamples = Math.floor(sampleRate * crossfadeOverlapSec);
       currentSampleOffset = Math.max(0, currentSampleOffset - overlapSamples);
     }
@@ -529,37 +555,26 @@ export async function assembleNativeHmongTrack(
     if (seg.syllable.isPunctuation) continue;
 
     if (seg.isNative && seg.audioBuffer && seg.trimBounds) {
-      const srcData = seg.audioBuffer.getChannelData(0);
       const bounds = seg.trimBounds;
 
       // High-fidelity speech interpolation that preserves natural human vocal tract formants:
       // Advances through the complete active speech bounds without premature cutoffs or truncation
       const numSamplesToWrite = seg.lengthSamples;
-      const effectiveLength = Math.max(1, numSamplesToWrite);
+      const proc = prepareWord(seg.audioBuffer, bounds, sampleRate, numSamplesToWrite);
       const wordGain = getWordLoudnessGain(seg.audioBuffer, bounds);
 
       // Sentence intonational dynamics: sentence starts with higher projection (+1.2 dB), decays smoothly
       const sentDynamics = Math.max(0.78, Math.min(1.15, 1.0 + seg.f0ShiftSemitones * 0.045));
 
       // Raised-cosine windowing for smooth legato inter-word liaison without clicks
-      const attackSamples = Math.max(48, Math.min(Math.floor(sampleRate * 0.012), Math.floor(numSamplesToWrite * 0.08)));
+      const attackSamples = Math.max(48, Math.min(Math.floor(sampleRate * 0.028), Math.floor(numSamplesToWrite * 0.14)));
       const releaseSamples = attackSamples; // equal ramps sum to unity across the word overlap
 
       for (let j = 0; j < numSamplesToWrite; j++) {
         const outIdx = seg.startSample + j;
         if (outIdx >= outData.length) break;
 
-        const progress = j / effectiveLength;
-        const srcPos = bounds.startSample + progress * bounds.activeLength;
-        const srcIdx = Math.floor(srcPos);
-        const frac = srcPos - srcIdx;
-
-        let sample = 0;
-        if (srcIdx >= bounds.startSample && srcIdx < bounds.endSample - 1) {
-          sample = srcData[srcIdx] * (1 - frac) + srcData[srcIdx + 1] * frac;
-        } else if (srcIdx >= bounds.startSample && srcIdx < bounds.endSample) {
-          sample = srcData[srcIdx];
-        }
+        let sample = proc[j] ?? 0;
 
         // Anti-click raised-cosine smoothing (Hanning curves for zero-derivative continuity)
         if (j < attackSamples) {
