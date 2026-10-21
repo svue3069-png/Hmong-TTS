@@ -410,10 +410,22 @@ export default function App() {
   const synthKey = JSON.stringify([text, dialect, audioSource, engineMode, currentVoice.id, rate, pitch, toneEmphasis, prosody]);
   const loadedKeyRef = React.useRef('');
   useEffect(() => {
-    if (studioPlayer.track && loadedKeyRef.current !== synthKey) studioPlayer.clearTrack();
+    if (studioPlayer.track && loadedKeyRef.current !== synthKey) {
+      loadedKeyRef.current = '';
+      studioPlayer.clearTrack();
+    }
   }, [synthKey, studioPlayer.track]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Syllables or words for synchronized karaoke display with English-friendly respellings and IPA
+  const handleAudioSourceChange = (nextSource: AudioSource) => {
+    if (nextSource === audioSource) return;
+    taskCoordinator.stopAll('voice_changed');
+    loadedKeyRef.current = '';
+    studioPlayer.clearTrack();
+    setCurrentWordIdx(null);
+    setAudioSource(nextSource);
+  };
+
+  // Syllables or words
   const displayTokens = useMemo(() => {
     if (resolvedEngine !== 'web_speech') {
       const parsed = parseHmongText(text, dialect);
@@ -1585,7 +1597,7 @@ export default function App() {
                   <div className="grid grid-cols-1 gap-2">
                     <button
                       type="button"
-                      onClick={() => setAudioSource('hmongdictionary_native')}
+                      onClick={() => handleAudioSourceChange('hmongdictionary_native')}
                       className={`p-3 rounded-xl border text-left transition flex items-start justify-between gap-2.5 ${
                         audioSource === 'hmongdictionary_native'
                           ? 'bg-emerald-950/70 border-emerald-500 text-white shadow-lg ring-1 ring-emerald-500/40'
@@ -1615,7 +1627,7 @@ export default function App() {
 
                     <button
                       type="button"
-                      onClick={() => setAudioSource('orpheus_neural')}
+                      onClick={() => handleAudioSourceChange('orpheus_neural')}
                       className={`p-2.5 rounded-xl border text-left transition flex items-start justify-between gap-2.5 ${
                         audioSource === 'orpheus_neural'
                           ? 'bg-violet-950/70 border-violet-500 text-white shadow-lg ring-1 ring-violet-500/40'

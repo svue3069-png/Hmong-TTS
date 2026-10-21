@@ -33,6 +33,7 @@ export interface SyllableDecomposition {
   englishRespelling?: string;
   gloss?: string;
   isOverride?: boolean;
+  isUserOverride?: boolean;
   formants: {
     f1: number;
     f2: number;
@@ -266,11 +267,40 @@ export function getHmongEnglishRespelling(text: string, dialect: HmongDialect = 
 /**
  * Decomposes a single Hmong RPA token into onset, nucleus vowel, and tone.
  */
+export function getPunctuationPauseSeconds(punctuation: string): number {
+  switch (punctuation) {
+    case ',':
+    case '，':
+      return 0.24;
+    case ';':
+    case '；':
+      return 0.32;
+    case ':':
+    case '：':
+      return 0.24;
+    case '.':
+    case '。':
+      return 0.62;
+    case '?':
+    case '？':
+      return 0.58;
+    case '!':
+    case '！':
+      return 0.52;
+    case '-':
+    case '–':
+    case '—':
+      return 0.18;
+    default:
+      return 0.14;
+  }
+}
+
 export function parseHmongSyllable(token: string, dialect: HmongDialect = 'dawb'): SyllableDecomposition {
   const clean = token.toLowerCase().trim();
 
   // If token is punctuation or symbol
-  if (/^[.,!?;:–—\s]+$/.test(clean) || clean.length === 0) {
+  if (/^[.,!?;:，。！？；：–—\s]+$/.test(clean) || clean.length === 0) {
     return {
       raw: token,
       clean: '',
@@ -350,14 +380,15 @@ export function parseHmongSyllable(token: string, dialect: HmongDialect = 'dawb'
   const toneInfo = HMONG_TONES[toneLetter] || HMONG_TONES[''];
   const formantInfo = HMONG_VOWELS[vowel] || HMONG_VOWELS['a'];
 
-  // Base syllable duration calculation based on acoustic studies:
-  // -m tone (creaky glottal cut) and -b tone are significantly shorter (~150-170ms)
-  // -v tone (rising) and diphthongs are held longer (~240-280ms)
+  // RPA timing follows the beginner pronunciation guide: the glottal -m tone
+  // is clipped, while the long low-rising -d tone is held noticeably longer.
   let durationMs = 210;
   if (formantInfo.isDiphthong || formantInfo.isNasal) durationMs += 45;
-  if (toneLetter === 'm') durationMs -= 45; // crisp glottal stop cutoff
-  if (toneLetter === 'b') durationMs -= 25; // crisp high tone
-  if (toneLetter === 'v') durationMs += 35; // elongated rising contour
+  if (toneLetter === 'm') durationMs -= 45; // abrupt glottal/creaky cutoff
+  if (toneLetter === 'b') durationMs -= 25; // crisp high-level tone
+  if (toneLetter === 'v') durationMs += 35; // mid-rising contour needs room
+  if (toneLetter === 'g') durationMs += 15; // breathy falling tone needs a softer release
+  if (toneLetter === 'd') durationMs += 55; // long low-rising tone
 
   // Build IPA transcription
   const onsetIpa = getOnsetIpa(identifiedOnset, dialect);
@@ -388,6 +419,7 @@ export function parseHmongSyllable(token: string, dialect: HmongDialect = 'dawb'
     englishRespelling: finalRespelling,
     gloss: override?.gloss,
     isOverride: Boolean(override),
+    isUserOverride: override?.source === 'user',
     formants: {
       f1: formantInfo.f1Start,
       f2: formantInfo.f2Start,
@@ -522,7 +554,7 @@ export const HMONG_SANDHI_TRIGGERS = new Set([
  */
 export function parseHmongText(text: string, dialect: HmongDialect = 'dawb'): SyllableDecomposition[] {
   // Normalize whitespace
-  const tokens = text.replace(/([.,!?;:])/g, ' $1 ').trim().split(/\s+/).filter(Boolean);
+  const tokens = text.replace(/([.,!?;:，。！？；：])/g, ' $1 ').trim().split(/\s+/).filter(Boolean);
   const results: SyllableDecomposition[] = [];
 
   for (let i = 0; i < tokens.length; i++) {

@@ -13,8 +13,8 @@ export interface AlignItem { index: number; token: string; clean: string; timeSt
 export interface Rendered { buffer: AudioBuffer; alignment: AlignItem[]; totalDuration: number }
 
 /**
- * Split text into consecutive runs of English vs. Hmong. Each sentence is classified as a whole first
- * (more reliable than single words); only sentences detected as mixed fall back to word-level routing.
+ * Split text into consecutive runs of English vs. Hmong. Mixed sentences are routed word-by-word
+ * so either language can appear inside an otherwise English- or Hmong-dominant sentence.
  */
 export function splitLanguageRuns(text: string): { lang: 'english' | 'hmong'; text: string }[] {
   const runs: { lang: 'english' | 'hmong'; text: string }[] = [];
@@ -22,7 +22,7 @@ export function splitLanguageRuns(text: string): { lang: 'english' | 'hmong'; te
     if (runs.at(-1)?.lang === lang) runs.at(-1)!.text += ' ' + t;
     else runs.push({ lang, text: t });
   };
-  for (const sentence of text.match(/[^.!?]+[.!?]*/g) ?? []) {
+  for (const sentence of text.match(/[^.!?。！？]+[.!?。！？]*/g) ?? []) {
     const sent = sentence.trim();
     if (!sent) continue;
     const d = detectLanguage(sent).language;

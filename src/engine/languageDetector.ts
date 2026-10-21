@@ -55,6 +55,9 @@ const ENGLISH_CORE_VOCAB = new Set([
   'how', 'our', 'work', 'first', 'well', 'way', 'even', 'new', 'want', 'because', 'any',
   'these', 'give', 'day', 'most', 'us', 'hello', 'welcome', 'thank', 'thanks', 'please',
   'doctor', 'hospital', 'medicine', 'today', 'everyone', 'speech', 'voice', 'sound',
+  'love', 'speak', 'learn', 'am', 'is', 'are', 'was', 'were', 'need', 'help', 'english',
+  'home', 'school', 'friend', 'family', 'name', 'language', 'word', 'sentence', 'read',
+  'write', 'understand', 'hmong',
 ]);
 
 // Characteristic Hmong RPA consonant clusters
@@ -71,11 +74,15 @@ const HMONG_TONE_LETTERS = new Set(['b', 'j', 'v', 's', 'g', 'm', 'd']);
  */
 export function classifyWord(token: string): { lang: 'hmong' | 'english' | 'unknown'; dialectHint?: HmongDialect } {
   const clean = token.toLowerCase().replace(/[^a-z]/g, '');
-  if (!clean || clean.length < 2) return { lang: 'unknown' };
+  if (!clean) return { lang: 'unknown' };
 
+  // Check the English lexicon before the length guard so valid words like "I" and "a"
+  // are not sent through the Hmong fallback.
   if (ENGLISH_CORE_VOCAB.has(clean)) {
     return { lang: 'english' };
   }
+
+  if (clean.length < 2) return { lang: 'unknown' };
 
   if (HMONG_CORE_VOCAB_DAWB.has(clean)) {
     const isLeegSpecific = clean === 'moog' || clean === 'lug' || clean === 'dleeg' || clean === 'dleev' || clean === 'hab' || clean === 'mej';

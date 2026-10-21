@@ -38,10 +38,28 @@ const rateLimit = (max: number, windowMs = 60_000) => (req: Request, res: Respon
   next();
 };
 
-// Native-speaker recordings of words missing from HmongDictionary.com, shared across devices
+const MAX_TTS_TEXT_LENGTH = 5_000;
+
+function readTtsText(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const text = value.trim();
+  return text.length > 0 && text.length <= MAX_TTS_TEXT_LENGTH ? text : null;
+}
+
+function normalizeRate(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value)
+    ? Math.min(2, Math.max(0.5, value))
+    : 1;
+}
+
+// User recordings and successfully fetched HmongDictionary audio are persisted separately.
 const CUSTOM_DIR = path.resolve(__dirname, 'data', 'custom-words');
+const NATIVE_DIR = path.resolve(__dirname, 'data', 'native-words');
 fs.mkdirSync(CUSTOM_DIR, { recursive: true });
-const customPath = (word: string) => path.join(CUSTOM_DIR, `${word.replace(/[^a-z0-9]/g, '')}.bin`);
+fs.mkdirSync(NATIVE_DIR, { recursive: true });
+const normalizedAudioKey = (word: string) => word.replace(/[^a-z0-9]/g, '').toLowerCase();
+const customPath = (word: string) => path.join(CUSTOM_DIR, `${normalizedAudioKey(word)}.bin`);
+const nativePath = (word: string) => path.join(NATIVE_DIR, `${normalizedAudioKey(word)}.bin`);
 
 const ai = new GoogleGenAI();
 
@@ -133,6 +151,13 @@ async function fetchNativeAudioBuffer(cleanWord: string, retries = 1): Promise<B
   const custom = customPath(key);
   if (fs.existsSync(custom)) return fs.readFileSync(custom);
 
+  const persistedNative = nativePath(key);
+  if (fs.existsSync(persistedNative)) {
+    const buffer = fs.readFileSync(persistedNative);
+    nativeAudioCache.set(key, buffer);
+    return buffer;
+  }
+
   // De-duplicate parallel in-flight requests for the exact same word
   if (inFlightAudioRequests.has(key)) {
     return inFlightAudioRequests.get(key)!;
@@ -164,6 +189,11 @@ async function fetchNativeAudioBuffer(cleanWord: string, retries = 1): Promise<B
           if (arrayBuf.byteLength > 100) {
             const buffer = Buffer.from(arrayBuf);
             nativeAudioCache.set(key, buffer);
+            try {
+              fs.writeFileSync(nativePath(key), buffer);
+            } catch (persistError) {
+              console.warn(`Fetched HmongDictionary audio for "${key}" but could not persist it:`, persistError);
+            }
             return buffer;
           }
         }
@@ -344,9 +374,10 @@ app.get('/api/audio/status', (_req: Request, res: Response) => {
 // Phonemize & linguistic tone analysis endpoint
 app.post('/api/tts/phonemize', (req: Request, res: Response) => {
   try {
-    const { text, dialect = 'dawb' } = req.body;
-    if (!text || typeof text !== 'string') {
-      return res.status(400).json({ error: 'Field "text" is required' });
+    const text = readTtsText(req.body?.text);
+    const dialect = req.body?.dialect === 'leeg' ? 'leeg' : 'dawb';
+    if (!text) {
+      return res.status(400).json({ error: `Field "text" is required and must be 1-${MAX_TTS_TEXT_LENGTH} characters` });
     }
 
     const syllables = parseHmongText(text, dialect as HmongDialect);
@@ -375,9 +406,21 @@ app.post('/api/tts/phonemize', (req: Request, res: Response) => {
 // Full Timing and Phonetic IPA & Tone Alignment Metadata Export endpoint
 app.post('/api/tts/metadata', (req: Request, res: Response) => {
   try {
-    const { text, dialect = 'dawb', voiceId = 'paj_dawb_female', rate = 1.0, pitch = 1.0, toneEmphasis = 1.1, prosody = 1.1 } = req.body;
-    if (!text || typeof text !== 'string') {
-      return res.status(400).json({ error: 'Field "text" is required' });
+    const text = readTtsText(req.body?.text);
+    const dialect = req.body?.dialect === 'leeg' ? 'leeg' : 'dawb';
+    const voiceId = typeof req.body?.voiceId === 'string' ? req.body.voiceId : 'paj_dawb_female';
+    const rate = normalizeRate(req.body?.rate);
+    const pitch = typeof req.body?.pitch === 'number' && Number.isFinite(req.body.pitch)
+      ? Math.min(1.5, Math.max(0.7, req.body.pitch))
+      : 1;
+    const toneEmphasis = typeof req.body?.toneEmphasis === 'number' && Number.isFinite(req.body.toneEmphasis)
+      ? Math.min(1.6, Math.max(0.8, req.body.toneEmphasis))
+      : 1.1;
+    const prosody = typeof req.body?.prosody === 'number' && Number.isFinite(req.body.prosody)
+      ? Math.min(2, Math.max(0, req.body.prosody))
+      : 1.1;
+    if (!text) {
+      return res.status(400).json({ error: `Field "text" is required and must be 1-${MAX_TTS_TEXT_LENGTH} characters` });
     }
 
     const syllables = parseHmongText(text, dialect as HmongDialect);
@@ -468,9 +511,9 @@ app.post('/api/tts/metadata', (req: Request, res: Response) => {
 // Auto-Detect Language (Hmong vs English vs Mixed) endpoint
 app.post('/api/tts/detect', (req: Request, res: Response) => {
   try {
-    const { text } = req.body;
-    if (!text || typeof text !== 'string') {
-      return res.status(400).json({ error: 'Field "text" is required' });
+    const text = readTtsText(req.body?.text);
+    if (!text) {
+      return res.status(400).json({ error: `Field "text" is required and must be 1-${MAX_TTS_TEXT_LENGTH} characters` });
     }
 
     const result = detectLanguage(text);
@@ -492,10 +535,17 @@ app.post('/api/tts/detect', (req: Request, res: Response) => {
 // Server-side synthesis endpoint
 app.post('/api/tts/synthesize', (req: Request, res: Response) => {
   try {
-    const { text, dialect = 'dawb', voiceId = 'paj_dawb_female', rate = 1.0, pitch = 1.0, format = 'wav' } = req.body;
+    const text = readTtsText(req.body?.text);
+    const dialect = req.body?.dialect === 'leeg' ? 'leeg' : 'dawb';
+    const voiceId = typeof req.body?.voiceId === 'string' ? req.body.voiceId : 'paj_dawb_female';
+    const rate = normalizeRate(req.body?.rate);
+    const pitch = typeof req.body?.pitch === 'number' && Number.isFinite(req.body.pitch)
+      ? Math.min(1.5, Math.max(0.7, req.body.pitch))
+      : 1;
+    const format = 'wav';
 
-    if (!text || typeof text !== 'string') {
-      return res.status(400).json({ error: 'Field "text" is required' });
+    if (!text) {
+      return res.status(400).json({ error: `Field "text" is required and must be 1-${MAX_TTS_TEXT_LENGTH} characters` });
     }
 
     const syllables = parseHmongText(text, dialect as HmongDialect);

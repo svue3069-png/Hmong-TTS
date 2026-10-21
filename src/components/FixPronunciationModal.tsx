@@ -150,24 +150,27 @@ export const FixPronunciationModal: React.FC<FixPronunciationModalProps> = ({
     taskCoordinator.notifyTaskStarted('fix_pronunciation');
     setIsPlayingTest(true);
     try {
-      // 1. Try native audio single-word endpoint first
-      const audioUrl = `/api/audio/hmong-word/${encodeURIComponent(word)}`;
-      const audio = new Audio(audioUrl);
-      
-      const playPromise = audio.play();
-      if (playPromise !== undefined) {
-        await playPromise.catch(async () => {
-          // Fallback to DSP synthesizer
-          const { buffer } = await hmongTTS.renderToAudioBuffer(word, dialect, {
-            rate: 0.95,
-            pitch: 1.0,
-            audioSource: 'hmong_dsp',
-          });
-          const wav = hmongTTS.encodeWav(buffer);
-          const fallbackAudio = new Audio(URL.createObjectURL(wav));
-          await fallbackAudio.play();
-        });
+      const hasUserCorrection = hmongPronunciationStore.get(word)?.source === 'user';
+      if (!hasUserCorrection) {
+        const audioUrl = `/api/audio/hmong-word/${encodeURIComponent(word)}`;
+        const nativeAudio = new Audio(audioUrl);
+        try {
+          await nativeAudio.play();
+          return;
+        } catch {
+          // A missing native clip falls through to the corrected DSP preview.
+        }
       }
+
+      const { buffer } = await hmongTTS.renderToAudioBuffer(word, dialect, {
+        rate: 0.95,
+        pitch: 1.0,
+        audioSource: 'hmong_dsp',
+      });
+      const wavUrl = URL.createObjectURL(hmongTTS.encodeWav(buffer));
+      const fallbackAudio = new Audio(wavUrl);
+      fallbackAudio.addEventListener('ended', () => URL.revokeObjectURL(wavUrl), { once: true });
+      await fallbackAudio.play();
     } catch (e) {
       console.warn('Test pronounce note:', e);
     } finally {

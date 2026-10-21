@@ -61,6 +61,7 @@ export function useStudioAudioPlayer(options: UseStudioAudioPlayerOptions = {}) 
   const trackRef = useRef<AudioTrackMetadata | null>(null);
   const isLoopingRef = useRef<boolean>(false);
   const speedRef = useRef<number>(1.0);
+  const synthesisRequestRef = useRef(0);
 
   trackRef.current = track;
   isLoopingRef.current = isLooping;
@@ -236,12 +237,16 @@ function safelyTeardownAudioElement(audio: HTMLAudioElement | null) {
   ): Promise<AudioTrackMetadata | null> => {
     if (!text.trim()) return null;
 
+    const requestId = ++synthesisRequestRef.current;
     setIsSynthesizing(true);
     try {
       const detection = detectLanguage(text);
+      const hasHmongTokens = detection.tokens.some((token) => token.lang === 'hmong');
+      const hasEnglishTokens = detection.tokens.some((token) => token.lang === 'english');
+      const isMixed = hasHmongTokens && hasEnglishTokens;
       const isEnglish =
         optionsConfig.engineMode === 'english' ||
-        (optionsConfig.engineMode === 'auto' && detection.language === 'english');
+        (optionsConfig.engineMode === 'auto' && detection.language === 'english' && !isMixed);
 
       const voice = optionsConfig.voice || HMONG_VOICE_PROFILES[0];
       const rate = optionsConfig.rate || 1.0;
@@ -257,6 +262,7 @@ function safelyTeardownAudioElement(audio: HTMLAudioElement | null) {
         // English words inside Hmong text are auto-detected and spoken with the English voice
         const { buffer, alignment, totalDuration } =
           (await renderMixed(text, rate, renderHmong)) ?? (await renderHmong(text));
+        if (requestId !== synthesisRequestRef.current) return null;
 
         const wavBlob = hmongTTS.encodeWav(buffer);
         const url = URL.createObjectURL(wavBlob);
@@ -295,6 +301,8 @@ function safelyTeardownAudioElement(audio: HTMLAudioElement | null) {
       } else {
         // English: neural Kokoro voice (the Hmong formant synth cannot pronounce English)
         const { buffer, durationSec: estDuration, alignment: syntheticAlignment } = await renderEnglish(text, rate);
+        if (requestId !== synthesisRequestRef.current) return null;
+
         const wavBlob = hmongTTS.encodeWav(buffer);
         const url = URL.createObjectURL(wavBlob);
 
@@ -326,7 +334,9 @@ function safelyTeardownAudioElement(audio: HTMLAudioElement | null) {
       console.error('Track synthesis error:', err);
       return null;
     } finally {
-      setIsSynthesizing(false);
+      if (requestId === synthesisRequestRef.current) {
+        setIsSynthesizing(false);
+      }
     }
   }, [options, setupAudioElement]);
 
@@ -481,8 +491,9 @@ function safelyTeardownAudioElement(audio: HTMLAudioElement | null) {
     a.click();
   }, [track]);
 
-  // Clear track and reset player to blank
+  // Clear track and invalidate any synthesis that is still in flight.
   const clearTrack = useCallback(() => {
+    synthesisRequestRef.current += 1;
     if (audioElementRef.current) {
       safelyTeardownAudioElement(audioElementRef.current);
       audioElementRef.current = null;

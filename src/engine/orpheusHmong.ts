@@ -18,7 +18,27 @@ export async function isOrpheusAvailable(): Promise<boolean> {
   }
 }
 
-const PAUSE_SEC = 0.3;
+const MAX_NEURAL_REQUEST_LENGTH = 300;
+const INTER_SENTENCE_PAUSE_SEC = 0.62;
+
+function splitNeuralText(text: string): string[] {
+  if (text.length <= MAX_NEURAL_REQUEST_LENGTH) return [text];
+
+  const sentences = text.match(/[^.!?。！？]+[.!?。！？]*/g) ?? [text];
+  const chunks: string[] = [];
+  let current = '';
+  for (const sentence of sentences) {
+    const candidate = current ? `${current} ${sentence.trim()}` : sentence.trim();
+    if (candidate.length > MAX_NEURAL_REQUEST_LENGTH && current) {
+      chunks.push(current);
+      current = sentence.trim();
+    } else {
+      current = candidate;
+    }
+  }
+  if (current) chunks.push(current);
+  return chunks;
+}
 
 export async function renderOrpheus(
   text: string,
@@ -30,39 +50,42 @@ export async function renderOrpheus(
   alignment: SyllableAlignmentMetadata[];
   totalDuration: number;
 } | null> {
-  const sentences = (text.match(/[^.!?]+[.!?]*/g) ?? []).map((s) => s.trim()).filter(Boolean);
-  if (sentences.length === 0) return null;
+  const chunks = splitNeuralText(text);
+  if (chunks.length === 0) return null;
 
   const parts: { data: Float32Array; syllables: SyllableDecomposition[] }[] = [];
-  for (const s of sentences) {
+  for (const chunk of chunks) {
     const res = await fetch('/api/tts/neural', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: s }),
+      body: JSON.stringify({ text: chunk }),
     });
     if (!res.ok) return null; // sidecar down or failed: caller falls back
     // decodeAudioData resamples the model's 24 kHz output to the context rate
     const decoded = await ctx.decodeAudioData(await res.arrayBuffer());
-    parts.push({ data: decoded.getChannelData(0).slice(), syllables: parseHmongText(s, dialect) });
+    parts.push({ data: decoded.getChannelData(0).slice(), syllables: parseHmongText(chunk, dialect) });
   }
 
   const sr = ctx.sampleRate;
-  const gap = Math.floor(sr * PAUSE_SEC);
-  const total = parts.reduce((n, p) => n + p.data.length + gap, 0);
+  const gap = Math.floor(sr * INTER_SENTENCE_PAUSE_SEC);
+  const total = parts.reduce((n, p, i) => n + p.data.length + (i < parts.length - 1 ? gap : 0), 0);
   const buffer = ctx.createBuffer(1, total, sr);
   const out = buffer.getChannelData(0);
 
   const alignment: SyllableAlignmentMetadata[] = [];
   const syllables: SyllableDecomposition[] = [];
   let pos = 0;
-  for (const p of parts) {
+  for (let partIndex = 0; partIndex < parts.length; partIndex++) {
+    const p = parts[partIndex];
+    const partGap = partIndex < parts.length - 1 ? gap : 0;
+    const partLength = p.data.length + partGap;
     out.set(p.data, pos);
     // Per-word timings are estimated (no aligner): split the clip by token length.
     const weights = p.syllables.map((s) => (s.isPunctuation ? 0.5 : Math.max(1, s.raw.length)));
     const wsum = weights.reduce((a, b) => a + b, 0) || 1;
     let t = pos;
     p.syllables.forEach((syl, i) => {
-      const len = Math.floor((weights[i] / wsum) * (p.data.length + gap));
+      const len = Math.floor((weights[i] / wsum) * partLength);
       alignment.push({
         index: alignment.length,
         token: syl.raw,
@@ -100,7 +123,7 @@ export async function renderOrpheus(
       syllables.push(syl);
       t += len;
     });
-    pos += p.data.length + gap;
+    pos += partLength;
   }
   return { buffer, syllables, alignment, totalDuration: total / sr };
 }

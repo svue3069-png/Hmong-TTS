@@ -12,6 +12,7 @@ import {
   SyllableDecomposition,
   getOnsetIpa,
   HMONG_VOWELS,
+  getPunctuationPauseSeconds,
 } from './hmongPhonology';
 import { applyNativeProsody } from './nativePronunciation';
 import { assembleNativeHmongTrack } from './hmongNativeAudio';
@@ -362,19 +363,7 @@ export class HmongAcousticEngine {
 
       let durationSec = 0;
       if (syl.isPunctuation) {
-        const punct = syl.raw;
-        let pauseSec = 0.34;
-        if (punct === '.' || punct === '。') {
-          pauseSec = 0.78; // STOP AT PERIOD
-        } else if (punct === '?' || punct === '？') {
-          pauseSec = 0.75; // QUESTION STOP
-        } else if (punct === '!' || punct === '！') {
-          pauseSec = 0.72; // EXCLAMATION STOP
-        } else if (punct === ',' || punct === ';' || punct === ':') {
-          pauseSec = 0.34;
-        } else if (punct === '-') {
-          pauseSec = 0.20;
-        }
+        const pauseSec = getPunctuationPauseSeconds(syl.raw);
         durationSec = pauseSec / rate;
       } else {
         durationSec = (syl.durationMs / 1000) / rate;

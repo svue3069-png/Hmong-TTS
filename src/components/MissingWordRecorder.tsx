@@ -50,6 +50,9 @@ export function MissingWordRecorder({ text, dialect }: { text: string; dialect: 
       <button onClick={check} className="flex items-center gap-2 text-emerald-400">
         <Search className="w-4 h-4" /> Find words with no native recording
       </button>
+      <p className="text-xs text-slate-500">
+        The app checks HmongDictionary first and saves found pronunciations to the server cache. Record only words it does not provide.
+      </p>
       {missing && missing.length === 0 && <p className="text-slate-400">All words have native recordings.</p>}
       {missing?.map((w) => (
         <div key={w} className="flex items-center justify-between">

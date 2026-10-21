@@ -8,9 +8,9 @@
  * continuous speech tracks with millisecond-exact syllable alignment.
  */
 
-import { HmongDialect, parseHmongText, SyllableDecomposition } from './hmongPhonology';
+import { HmongDialect, getPunctuationPauseSeconds, parseHmongText, SyllableDecomposition } from './hmongPhonology';
 import { SyllableAlignmentMetadata } from './hmongAudioSynthesizer';
-import { getWordRecording } from './customWordRecordings';
+import { getWordRecording, saveWordRecording } from './customWordRecordings';
 
 export interface NativeAudioBatchResult {
   found: boolean;
@@ -78,6 +78,11 @@ export async function fetchAndDecodeNativeWord(
       if (arrayBuf.byteLength > 100) {
         const decoded = await audioCtx.decodeAudioData(arrayBuf.slice(0));
         decodedBufferCache.set(clean, decoded);
+        try {
+          await saveWordRecording(clean, new Blob([arrayBuf], { type: 'audio/mpeg' }));
+        } catch {
+          // Playback remains available if browser storage is unavailable.
+        }
         return decoded;
       }
     }
@@ -144,9 +149,10 @@ export async function preloadNativeWordsBatch(
           if (info.found && info.audioBase64) {
             try {
               const arrayBuf = base64ToArrayBuffer(info.audioBase64);
-              const decoded = await audioCtx.decodeAudioData(arrayBuf);
+              const decoded = await audioCtx.decodeAudioData(arrayBuf.slice(0));
               decodedBufferCache.set(w, decoded);
               resultMap.set(w, decoded);
+              await saveWordRecording(w, new Blob([arrayBuf], { type: 'audio/mpeg' }));
             } catch {
               // Graceful fallback for decoding
             }
@@ -310,7 +316,7 @@ export async function assembleNativeHmongTrack(
       currentSentenceWords.push(i);
     } else {
       const punct = syl.raw;
-      const isTerminal = punct === '.' || punct === '!' || punct === '?';
+      const isTerminal = punct === '.' || punct === '。' || punct === '!' || punct === '！' || punct === '?' || punct === '？';
       if (isTerminal && currentSentenceWords.length > 0) {
         const totalInSent = currentSentenceWords.length;
         for (let k = 0; k < totalInSent; k++) {
@@ -421,25 +427,7 @@ export async function assembleNativeHmongTrack(
     const syl = parsedSyllables[i];
 
     if (syl.isPunctuation) {
-      const punct = syl.raw;
-      let pauseSec = 0.22; // Default comma / clause pause (340ms)
-
-      if (punct === '.' || punct === '。') {
-        // STOP AT PERIOD: 780ms clear breath pause for complete sentence closure
-        pauseSec = 0.45;
-      } else if (punct === '?' || punct === '？') {
-        // QUESTION STOP: 750ms interrogative sentence pause
-        pauseSec = 0.45;
-      } else if (punct === '!' || punct === '！') {
-        // EXCLAMATION STOP: 720ms sentence pause
-        pauseSec = 0.45;
-      } else if (punct === ',' || punct === '，' || punct === ';' || punct === ':') {
-        // Minor clause pause
-        pauseSec = 0.22;
-      } else if (punct === '-') {
-        pauseSec = 0.20;
-      }
-
+      const pauseSec = getPunctuationPauseSeconds(syl.raw);
       const pauseSamples = Math.floor(sampleRate * (pauseSec / rate));
 
       segments.push({
@@ -452,7 +440,7 @@ export async function assembleNativeHmongTrack(
         durationSec: pauseSec / rate,
         f0ShiftSemitones: 0,
         isPrePeriodWord: false,
-        terminalPunctuation: punct,
+        terminalPunctuation: syl.raw,
       });
 
       currentSampleOffset += pauseSamples;
@@ -461,7 +449,9 @@ export async function assembleNativeHmongTrack(
 
     totalWordsCount++;
     const cleanWord = (syl.clean || syl.raw).toLowerCase();
-    const cached = decodedBufferCache.get(cleanWord) || null;
+    // A user correction must be audible: bypass the old native clip so the
+    // corrected tone/phonology is rendered by the DSP path.
+    const cached = syl.isUserOverride ? null : (decodedBufferCache.get(cleanWord) || null);
     const prosodyCtx = prosodyMap.get(i);
 
     const f0Shift = prosodyCtx ? prosodyCtx.f0ShiftSemitones : 0;
@@ -524,8 +514,45 @@ export async function assembleNativeHmongTrack(
   // Phase 3: Synthesize and Crossfade Audio Waveforms
   const masterBuffer = audioCtx.createBuffer(1, currentSampleOffset, sampleRate);
   const outData = masterBuffer.getChannelData(0);
+  const edgeFadeSamples = Math.floor(sampleRate * 0.004);
 
-  for (const seg of segments) {
+  const getSegmentEnvelope = (
+    index: number,
+    sampleIndex: number,
+    segmentLength: number,
+  ): number => {
+    const segment = segments[index];
+    const previous = segments[index - 1];
+    const next = segments[index + 1];
+    const overlapWithPrevious = previous && !previous.syllable.isPunctuation
+      ? Math.max(0, previous.startSample + previous.lengthSamples - segment.startSample)
+      : 0;
+    const overlapWithNext = next && !next.syllable.isPunctuation
+      ? Math.max(0, segment.startSample + segment.lengthSamples - next.startSample)
+      : 0;
+    const edgeFade = Math.min(edgeFadeSamples, Math.max(1, Math.floor(segmentLength / 2)));
+
+    let envelope = 1;
+    if (overlapWithPrevious > 0 && sampleIndex < overlapWithPrevious) {
+      envelope *= Math.sin((sampleIndex / Math.max(1, overlapWithPrevious)) * Math.PI / 2);
+    } else if (overlapWithPrevious === 0 && sampleIndex < edgeFade) {
+      envelope *= 0.5 * (1 - Math.cos(Math.PI * sampleIndex / edgeFade));
+    }
+
+    const releaseStart = segmentLength - overlapWithNext;
+    if (overlapWithNext > 0 && sampleIndex >= releaseStart) {
+      envelope *= Math.cos(((sampleIndex - releaseStart) / Math.max(1, overlapWithNext)) * Math.PI / 2);
+    } else if (overlapWithNext === 0 && sampleIndex >= segmentLength - edgeFade) {
+      envelope *= 0.5 * (1 + Math.cos(
+        Math.PI * (sampleIndex - (segmentLength - edgeFade)) / edgeFade
+      ));
+    }
+
+    return envelope;
+  };
+
+  for (let segmentIndex = 0; segmentIndex < segments.length; segmentIndex++) {
+    const seg = segments[segmentIndex];
     if (seg.syllable.isPunctuation) continue;
 
     if (seg.isNative && seg.audioBuffer && seg.trimBounds) {
@@ -540,10 +567,6 @@ export async function assembleNativeHmongTrack(
 
       // Sentence intonational dynamics: sentence starts with higher projection (+1.2 dB), decays smoothly
       const sentDynamics = Math.max(0.78, Math.min(1.15, 1.0 + seg.f0ShiftSemitones * 0.045));
-
-      // Raised-cosine windowing for smooth legato inter-word liaison without clicks
-      const attackSamples = Math.max(48, Math.min(Math.floor(sampleRate * 0.012), Math.floor(numSamplesToWrite * 0.08)));
-      const releaseSamples = attackSamples; // equal ramps sum to unity across the word overlap
 
       for (let j = 0; j < numSamplesToWrite; j++) {
         const outIdx = seg.startSample + j;
@@ -561,17 +584,10 @@ export async function assembleNativeHmongTrack(
           sample = srcData[srcIdx];
         }
 
-        // Anti-click raised-cosine smoothing (Hanning curves for zero-derivative continuity)
-        if (j < attackSamples) {
-          const t = j / attackSamples;
-          sample *= 0.5 * (1 - Math.cos(Math.PI * t));
-        } else if (j > numSamplesToWrite - releaseSamples) {
-          const t = (numSamplesToWrite - j) / releaseSamples;
-          sample *= 0.5 * (1 - Math.cos(Math.PI * t));
-        }
+        sample *= getSegmentEnvelope(segmentIndex, j, numSamplesToWrite);
 
-        // Terminal Decrescendo before period: gentle settling volume envelope
-        if (seg.isPrePeriodWord && seg.terminalPunctuation === '.') {
+        // Terminal decrescendo before a period: gentle settling volume envelope.
+        if (seg.isPrePeriodWord && (seg.terminalPunctuation === '.' || seg.terminalPunctuation === '。')) {
           const decrescendoStart = Math.floor(numSamplesToWrite * 0.65);
           if (j > decrescendoStart) {
             const decrescendoRatio = 1.0 - 0.28 * ((j - decrescendoStart) / (numSamplesToWrite - decrescendoStart));
@@ -588,7 +604,8 @@ export async function assembleNativeHmongTrack(
       for (let j = 0; j < copyLen; j++) {
         const outIdx = seg.startSample + j;
         if (outIdx < outData.length) {
-          outData[outIdx] += dspSamples[j] * 0.75;
+          const envelope = getSegmentEnvelope(segmentIndex, j, copyLen);
+          outData[outIdx] += dspSamples[j] * 0.75 * envelope;
         }
       }
     }
