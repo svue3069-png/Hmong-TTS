@@ -531,7 +531,7 @@ export default function App() {
       a.href = url;
       a.download = `hmongtts_${dialect}_${Date.now()}.wav`;
       a.click();
-      URL.revokeObjectURL(url);
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (e) {
       console.error('Export WAV error:', e);
     } finally {
@@ -556,7 +556,7 @@ export default function App() {
       a.href = url;
       a.download = `hmong_tts_metadata_${dialect}_${Date.now()}.json`;
       a.click();
-      URL.revokeObjectURL(url);
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (err) {
       console.error('Export Metadata JSON error:', err);
     } finally {

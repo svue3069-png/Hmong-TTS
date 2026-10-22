@@ -525,6 +525,9 @@ function safelyTeardownAudioElement(audio: HTMLAudioElement | null) {
         safelyTeardownAudioElement(audioElementRef.current);
         audioElementRef.current = null;
       }
+      if (trackRef.current?.url) {
+        URL.revokeObjectURL(trackRef.current.url);
+      }
     };
   }, []);
 

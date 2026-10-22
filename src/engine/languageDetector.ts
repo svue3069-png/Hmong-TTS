@@ -6,7 +6,7 @@
  * Fast, accurate heuristics for Hmong RPA vs English classification & code-switching detection.
  */
 
-import { HmongDialect } from './hmongPhonology';
+import { HmongDialect } from './hmongPhonology.ts';
 
 export type DetectedLanguage = 'hmong' | 'english' | 'mixed';
 

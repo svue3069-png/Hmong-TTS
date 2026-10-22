@@ -61,7 +61,16 @@ const normalizedAudioKey = (word: string) => word.replace(/[^a-z0-9]/g, '').toLo
 const customPath = (word: string) => path.join(CUSTOM_DIR, `${normalizedAudioKey(word)}.bin`);
 const nativePath = (word: string) => path.join(NATIVE_DIR, `${normalizedAudioKey(word)}.bin`);
 
-const ai = new GoogleGenAI();
+const ai = process.env.GEMINI_API_KEY
+  ? new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY })
+  : null;
+
+function detectAudioMime(buffer: Buffer): string {
+  if (buffer.subarray(0, 4).toString('ascii') === 'RIFF') return 'audio/wav';
+  if (buffer.subarray(0, 4).toString('ascii') === 'OggS') return 'audio/ogg';
+  if (buffer.length >= 4 && buffer[0] === 0x1a && buffer[1] === 0x45 && buffer[2] === 0xdf && buffer[3] === 0xa3) return 'audio/webm';
+  return 'audio/mpeg';
+}
 
 // Health check endpoint
 app.get('/api/health', (_req: Request, res: Response) => {
@@ -70,6 +79,8 @@ app.get('/api/health', (_req: Request, res: Response) => {
     engine: 'HmongTTS Core Engine v2.4.0',
     dialects: ['dawb', 'leeg'],
     offlineEnabled: true,
+    geminiConfigured: Boolean(ai),
+    neuralBackendUrl: ORPHEUS_URL,
     timestamp: new Date().toISOString(),
   });
 });
@@ -301,7 +312,7 @@ app.get('/api/audio/hmong-word/:word', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Audio not found in native Hmong dictionary', word: cleanWord });
     }
 
-    res.setHeader('Content-Type', 'audio/mpeg');
+    res.setHeader('Content-Type', detectAudioMime(buffer));
     res.setHeader('Cache-Control', 'public, max-age=604800, immutable');
     res.setHeader('Content-Length', buffer.length.toString());
     return res.send(buffer);
@@ -653,6 +664,10 @@ Rules:
 2. If the speech is English, transcribe in standard English spelling.
 3. If the audio is code-switched / bilingual (both Hmong and English), transcribe each word in its authentic orthography.
 4. Output ONLY the raw transcribed text. Do not output conversational preamble, markdown headers, explanations, or quotes.`;
+
+    if (!ai) {
+      return res.status(503).json({ error: 'Gemini API is not configured for audio transcription.' });
+    }
 
     let transcript = '';
     try {

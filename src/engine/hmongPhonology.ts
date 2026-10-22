@@ -20,7 +20,7 @@ export interface HmongToneInfo {
   audioEffect: 'flat_high' | 'falling_high' | 'rising_mid' | 'flat_mid' | 'flat_low' | 'falling_breathy' | 'low_creaky' | 'low_rising';
 }
 
-import { hmongPronunciationStore } from './hmongPronunciationOverrides';
+import { hmongPronunciationStore } from './hmongPronunciationOverrides.ts';
 
 export interface SyllableDecomposition {
   raw: string;
