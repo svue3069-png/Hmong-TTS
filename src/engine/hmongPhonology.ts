@@ -175,6 +175,7 @@ export const HMONG_VOWELS: Record<string, VowelFormantProfile> = {
   ai: { f1Start: 820, f2Start: 1250, f3Start: 2600, f1End: 300, f2End: 2200, f3End: 2850, ipa: 'ai', isDiphthong: true, isNasal: false },
   au: { f1Start: 820, f2Start: 1250, f3Start: 2600, f1End: 340, f2End: 850, f3End: 2350, ipa: 'au', isDiphthong: true, isNasal: false },
   aw: { f1Start: 780, f2Start: 1250, f3Start: 2600, f1End: 340, f2End: 1420, f3End: 2380, ipa: 'aɨ', isDiphthong: true, isNasal: false },
+  aaw: { f1Start: 800, f2Start: 1250, f3Start: 2600, f1End: 340, f2End: 1420, f3End: 2380, ipa: 'aːɨ', isDiphthong: true, isNasal: false }, // Moob Leeg long aw
   
   // Nasalized Vowels (White & Green Hmong)
   aa: { f1Start: 820, f2Start: 1280, f3Start: 2550, f1End: 800, f2End: 1350, f3End: 2500, ipa: 'ãŋ', isDiphthong: false, isNasal: true }, // Moob Leeg unique nasalized low vowel
@@ -210,7 +211,7 @@ const ONSET_CONSONANTS_DAWB = [
   'plh', 'tsh', 'txh',
   'npl', 'nts', 'ntx',
   'nc', 'nk', 'np', 'nq', 'nr', 'nt',
-  'ch', 'kh', 'ph', 'qh', 'rh', 'th', 'ts', 'tx',
+  'ch', 'dh', 'kh', 'ph', 'qh', 'rh', 'th', 'ts', 'tx', 'xy',
   'hl', 'hm', 'hn', 'ml', 'ny', 'pl',
   'c', 'd', 'f', 'h', 'k', 'l', 'm', 'n', 'p', 'q', 'r', 's', 't', 'v', 'x', 'y', 'z', ''
 ];
@@ -221,7 +222,7 @@ const ONSET_CONSONANTS_LEEG = [
   'dlh', 'plh', 'tsh', 'txh',
   'npl', 'nts', 'ntx',
   'nc', 'nk', 'np', 'nq', 'nr', 'nt',
-  'dl', 'ch', 'kh', 'ph', 'qh', 'rh', 'th', 'ts', 'tx',
+  'dl', 'ch', 'dh', 'kh', 'ph', 'qh', 'rh', 'th', 'ts', 'tx', 'xy',
   'hl', 'hm', 'hn', 'ml', 'ny', 'pl',
   'c', 'd', 'f', 'h', 'k', 'l', 'm', 'n', 'p', 'q', 'r', 's', 't', 'v', 'x', 'y', 'z', ''
 ];
@@ -461,6 +462,7 @@ export function getOnsetIpa(onset: string, dialect: HmongDialect): string {
     t: 't',
     th: 'tʰ',
     d: 'd',
+    dh: 'dʱ', // aspirated d (dhau, dhia)
     n: 'n',
     hn: 'n̥',
     nt: 'ⁿd',
@@ -496,6 +498,7 @@ export function getOnsetIpa(onset: string, dialect: HmongDialect): string {
     nrh: 'ᶯʂ',
     s: 's',
     x: 's',
+    xy: 'ç', // voiceless palatal fricative (xyoo, xya)
     y: 'j',
     z: 'ʑ',
     // Moob Leeg unique onsets
@@ -616,9 +619,13 @@ export function convertDialectText(text: string, from: HmongDialect, to: HmongDi
 
   let converted = text;
   for (const item of DIALECT_MAPPINGS) {
-    const src = from === 'dawb' ? item.dawb : item.leeg;
-    const tgt = to === 'dawb' ? item.dawb : item.leeg;
-    if (src !== tgt) {
+    const srcField = from === 'dawb' ? item.dawb : item.leeg;
+    const tgtField = to === 'dawb' ? item.dawb : item.leeg;
+    // Fields may list variants ("dlaag / dleeg"): match any variant, emit the first.
+    const srcVariants = srcField.split('/').map((v) => v.trim()).filter(Boolean);
+    const tgt = tgtField.split('/')[0].trim();
+    for (const src of srcVariants) {
+      if (src === tgt) continue;
       const regex = new RegExp(`\\b${src}\\b`, 'gi');
       converted = converted.replace(regex, (match) => {
         // preserve case
