@@ -12,7 +12,7 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
-import { parseHmongText, HmongDialect, HMONG_TONES, HMONG_VOWELS, DIALECT_MAPPINGS } from './src/engine/hmongPhonology.ts';
+import { parseHmongText, getOnsetIpa, getPunctuationPauseSeconds, HmongDialect, HMONG_TONES, HMONG_VOWELS, DIALECT_MAPPINGS } from './src/engine/hmongPhonology.ts';
 import { detectLanguage } from './src/engine/languageDetector.ts';
 
 dotenv.config();
@@ -37,6 +37,14 @@ const rateLimit = (max: number, windowMs = 60_000) => (req: Request, res: Respon
   hits.set(req.ip || '', recent);
   next();
 };
+
+// Sweep stale rate-limit entries so the map can't grow without bound
+setInterval(() => {
+  const cutoff = Date.now() - 120_000;
+  for (const [ip, times] of hits) {
+    if (times.every((t) => t < cutoff)) hits.delete(ip);
+  }
+}, 300_000).unref();
 
 const MAX_TTS_TEXT_LENGTH = 5_000;
 
@@ -322,7 +330,7 @@ app.get('/api/audio/hmong-word/:word', async (req: Request, res: Response) => {
 });
 
 // Native Hmong Audio Batch Endpoint: Retrieve multiple word recordings with pool throttling
-app.post('/api/audio/hmong-batch', async (req: Request, res: Response) => {
+app.post('/api/audio/hmong-batch', rateLimit(10), async (req: Request, res: Response) => {
   try {
     const { words } = req.body;
     if (!Array.isArray(words) || words.length === 0) {
@@ -462,9 +470,9 @@ app.post('/api/tts/metadata', (req: Request, res: Response) => {
         sampleEnd: endSample,
         phonetics: {
           onset: s.onset,
-          onsetIpa: s.onset ? `[${s.onset}]` : '∅',
+          onsetIpa: s.onset ? `[${getOnsetIpa(s.onset, dialect as HmongDialect)}]` : '∅',
           vowel: s.vowel,
-          vowelIpa: `[${s.vowel}]`,
+          vowelIpa: `[${HMONG_VOWELS[s.vowel]?.ipa ?? s.vowel}]`,
           toneLetter: s.toneLetter || 'unmarked',
           toneName: s.tone.name,
           chaoNumber: s.tone.chaoNumber,
@@ -565,11 +573,18 @@ app.post('/api/tts/synthesize', (req: Request, res: Response) => {
     const sampleRate = 44100;
     const baseF0 = (voiceId.includes('male') || voiceId.includes('kaub')) ? 135 : 225;
     
-    // Estimate samples
-    let totalSamples = Math.floor(sampleRate * 0.05);
-    const validSyllables = syllables.filter(s => !s.isPunctuation);
-    const durPerSyl = Math.floor((sampleRate * 0.22) / rate);
-    totalSamples += validSyllables.length * durPerSyl + Math.floor(sampleRate * 0.1);
+    // Per-syllable segment plan: honors tone-specific durations (clipped -m, long -d),
+    // punctuation pauses, and inter-syllable gaps so audio matches /api/tts/metadata timing.
+    const interGapSamples = Math.floor(sampleRate * 0.018);
+    const segments = syllables.map((s) => ({
+      syllable: s,
+      voicedSamples: s.isPunctuation ? 0 : Math.floor((sampleRate * (s.durationMs / 1000)) / rate),
+      gapSamples: s.isPunctuation
+        ? Math.floor(sampleRate * getPunctuationPauseSeconds(s.raw.trim()))
+        : interGapSamples,
+    }));
+    let totalSamples = Math.floor(sampleRate * 0.05) + Math.floor(sampleRate * 0.1);
+    for (const seg of segments) totalSamples += seg.voicedSamples + seg.gapSamples;
 
     const buffer = Buffer.alloc(44 + totalSamples * 2);
 
@@ -589,14 +604,15 @@ app.post('/api/tts/synthesize', (req: Request, res: Response) => {
     buffer.writeUInt32LE(totalSamples * 2, 40);
 
     // Generate harmonic samples with Hmong tone pitch trajectory
-    let sampleOffset = 44;
+    let sampleOffset = 44 + Math.floor(sampleRate * 0.05) * 2;
     let phase = 0;
 
-    for (const syl of validSyllables) {
+    for (const seg of segments) {
+      const { syllable: syl, voicedSamples, gapSamples } = seg;
       const contour = syl.pitchTrajectory;
-      for (let i = 0; i < durPerSyl; i++) {
+      for (let i = 0; i < voicedSamples; i++) {
         if (sampleOffset >= buffer.length - 2) break;
-        const progress = i / durPerSyl;
+        const progress = i / voicedSamples;
         const cIdx = progress * (contour.length - 1);
         const cLower = Math.floor(cIdx);
         const cUpper = Math.min(cLower + 1, contour.length - 1);
@@ -617,6 +633,8 @@ app.post('/api/tts/synthesize', (req: Request, res: Response) => {
         buffer.writeInt16LE(pcm16, sampleOffset);
         sampleOffset += 2;
       }
+      // Silence gap (buffer is zero-filled; just advance)
+      sampleOffset = Math.min(sampleOffset + gapSamples * 2, buffer.length - 2);
     }
 
     const audioBase64 = buffer.toString('base64');
