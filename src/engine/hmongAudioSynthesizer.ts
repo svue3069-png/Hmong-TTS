@@ -9,6 +9,7 @@
 import {
   HmongDialect,
   parseHmongText,
+  normalizeHmongNumbers,
   SyllableDecomposition,
   getOnsetIpa,
   HMONG_VOWELS,
@@ -283,8 +284,9 @@ export class HmongAcousticEngine {
     const toneScale = (options.toneEmphasis || 1.0) * voice.toneExaggeration;
 
     const prosody = options.prosody !== undefined ? options.prosody : 1.0;
+    const normalizedText = normalizeHmongNumbers(text);
 
-    const rawSyllables = parseHmongText(text, dialect);
+    const rawSyllables = parseHmongText(normalizedText, dialect);
     const validCount = rawSyllables.filter(s => !s.isPunctuation).length;
     let wordCounter = 0;
     const syllables = rawSyllables.map((s) => {
@@ -297,7 +299,7 @@ export class HmongAcousticEngine {
     // 0. Optional neural backend (Orpheus-Hmong sidecar). Unavailable or failing -> fall through to recordings.
     if (options.audioSource === 'orpheus_neural') {
       try {
-        const neural = await renderOrpheus(text, dialect, ctx);
+        const neural = await renderOrpheus(normalizedText, dialect, ctx);
         if (neural) return neural;
       } catch (err) {
         console.warn('Orpheus-Hmong unavailable, using recorded words:', err);
@@ -307,7 +309,7 @@ export class HmongAcousticEngine {
     // 1. Primary Engine: Authentic Native Recorded Audio from HmongDictionary.com & Hmong Voice Archives
     if (options.audioSource !== 'hmong_dsp') {
       try {
-        const nativeResult = await assembleNativeHmongTrack(text, dialect, ctx, {
+        const nativeResult = await assembleNativeHmongTrack(normalizedText, dialect, ctx, {
           rate,
           prosody,
           fallbackSynthesizer: (syl, sr) => {

@@ -230,6 +230,55 @@ const ONSET_CONSONANTS_LEEG = [
 const VOWEL_KEYS = ['aaw', 'ai', 'au', 'aw', 'aa', 'ee', 'oo', 'ia', 'ua', 'a', 'e', 'i', 'o', 'u', 'w'];
 const TONE_KEYS = ['b', 'j', 'v', 's', 'g', 'm', 'd'];
 
+const HMONG_NUMBER_ONES = ['xoom', 'ib', 'ob', 'peb', 'plaub', 'tsib', 'rau', 'xya', 'yim', 'cuaj'];
+
+function underOneHundred(value: number): string {
+  if (value < 10) return HMONG_NUMBER_ONES[value];
+  if (value === 10) return 'kaum';
+  if (value < 20) return `kaum ${HMONG_NUMBER_ONES[value - 10]}`;
+  if (value === 20) return 'nees nkaum';
+  if (value < 30) return `nees nkaum ${HMONG_NUMBER_ONES[value - 20]}`;
+
+  const tens = Math.floor(value / 10);
+  const remainder = value % 10;
+  return `${HMONG_NUMBER_ONES[tens]} caug${remainder ? ` ${HMONG_NUMBER_ONES[remainder]}` : ''}`;
+}
+
+function underOneThousand(value: number): string {
+  if (value < 100) return underOneHundred(value);
+
+  const hundreds = Math.floor(value / 100);
+  const remainder = value % 100;
+  return `${HMONG_NUMBER_ONES[hundreds]} puas${remainder ? ` ${underOneHundred(remainder)}` : ''}`;
+}
+
+/** Converts an integer written with digits into a natural Hmong cardinal number. */
+export function numberToHmong(value: number): string {
+  if (!Number.isSafeInteger(value) || value < 0 || value > 999_999_999_999) return String(value);
+  if (value < 1000) return underOneThousand(value);
+
+  const parts: string[] = [];
+  const billions = Math.floor(value / 1_000_000_000);
+  const millions = Math.floor((value % 1_000_000_000) / 1_000_000);
+  const thousands = Math.floor((value % 1_000_000) / 1000);
+  const remainder = value % 1000;
+
+  if (billions) parts.push(`${underOneThousand(billions)} txhiab lab`);
+  if (millions) parts.push(`${underOneThousand(millions)} lab`);
+  if (thousands) parts.push(`${underOneThousand(thousands)} txhiab`);
+  if (remainder) parts.push(underOneThousand(remainder));
+
+  return parts.join(' ');
+}
+
+/** Replaces standalone digit groups while leaving dates, words, and punctuation intact. */
+export function normalizeHmongNumbers(text: string): string {
+  return text.replace(/(?<![A-Za-z])(?:\d{1,3}(?:,\d{3})+|\d+)(?![A-Za-z])/g, (token) => {
+    const value = Number(token.replace(/,/g, ''));
+    return Number.isSafeInteger(value) ? numberToHmong(value) : token;
+  });
+}
+
 export const ONSET_RESPELLING: Record<string, string> = {
   nplh: 'umpl', ntsh: 'unch', ntxh: 'unts', nph: 'ump', npl: 'umpl',
   nts: 'unts', ntx: 'unts', nth: 'unt', nkh: 'ungk', nch: 'unch',
@@ -556,8 +605,9 @@ export const HMONG_SANDHI_TRIGGERS = new Set([
  * Parses full Hmong sentences into structured syllables with authentic tone sandhi applied.
  */
 export function parseHmongText(text: string, dialect: HmongDialect = 'dawb'): SyllableDecomposition[] {
-  // Normalize whitespace
-  const tokens = text.replace(/([.,!?;:，。！？；：])/g, ' $1 ').trim().split(/\s+/).filter(Boolean);
+  // Convert digit input before tokenization so the acoustic engine speaks Hmong cardinal words.
+  const normalizedText = normalizeHmongNumbers(text);
+  const tokens = normalizedText.replace(/([.,!?;:，。！？；：])/g, ' $1 ').trim().split(/\s+/).filter(Boolean);
   const results: SyllableDecomposition[] = [];
 
   for (let i = 0; i < tokens.length; i++) {

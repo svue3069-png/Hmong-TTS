@@ -218,6 +218,8 @@ export default defineConfig(() => {
       hmr: process.env.DISABLE_HMR !== 'true',
       // Disable file watching when DISABLE_HMR is true to save CPU during agent edits.
       watch: process.env.DISABLE_HMR === 'true' ? null : {},
+      // Vite 8 serves HMR on a WebSocket port (default 24678); the TTS Suite launcher gives each app its own via TTS_WS_PORT so several can run at once.
+      ws: process.env.TTS_WS_PORT ? { port: Number(process.env.TTS_WS_PORT) } : undefined,
     },
   };
 });
