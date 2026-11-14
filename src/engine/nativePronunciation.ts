@@ -364,7 +364,8 @@ export function applyNativeProsody(
 
   const wordKey = syllable.clean.toLowerCase();
   const lexicon = dialect === 'leeg' ? NATIVE_LEXICON_LEEG : NATIVE_LEXICON_DAWB;
-  const tuning = lexicon[wordKey];
+  // Own-property lookup: a bare `lexicon[wordKey]` returns Object.prototype members for words like "constructor".
+  const tuning = Object.prototype.hasOwnProperty.call(lexicon, wordKey) ? lexicon[wordKey] : undefined;
 
   // Natural phrase-level declination (sentence starts ~8% higher, drops ~12% by the end)
   const sentenceProgress = totalWords > 1 ? wordIndex / (totalWords - 1) : 0.5;

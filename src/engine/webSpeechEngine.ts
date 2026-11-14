@@ -23,6 +23,9 @@ export class WebSpeechEngine {
   private currentUtterance: SpeechSynthesisUtterance | null = null;
   private isSpeakingState = false;
   private availableVoices: SpeechSynthesisVoice[] = [];
+  // Settles the in-flight speak() (fires its onEnd and resolves its promise). stop() detaches the
+  // utterance handlers, so without this a cancelled speak() would never settle.
+  private settlePending: (() => void) | null = null;
 
   constructor() {
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
@@ -61,6 +64,9 @@ export class WebSpeechEngine {
   }
 
   public stop(): void {
+    const settle = this.settlePending;
+    this.settlePending = null;
+
     if (this.currentUtterance) {
       this.currentUtterance.onstart = null;
       this.currentUtterance.onend = null;
@@ -74,6 +80,11 @@ export class WebSpeechEngine {
     }
     this.isSpeakingState = false;
     this.currentUtterance = null;
+
+    // The browser will not report the cancelled utterance finishing (its handlers are detached), so
+    // settle it here. This runs last, once the engine is fully reset, so an onEnd that immediately
+    // calls speak() again starts from a clean state and is not cancelled by this stop().
+    settle?.();
   }
 
   public isBusy(): boolean {
@@ -95,6 +106,17 @@ export class WebSpeechEngine {
 
       const utterance = new SpeechSynthesisUtterance(text);
       this.currentUtterance = utterance;
+
+      // Lets stop() settle this call (fire onEnd, resolve) if the utterance is cancelled mid-flight.
+      const settle = () => {
+        try {
+          if (options.onEnd) options.onEnd();
+        } catch (err) {
+          console.error('Web Speech onEnd handler error:', err);
+        }
+        resolve();
+      };
+      this.settlePending = settle;
 
       utterance.lang = options.lang || 'en-US';
       utterance.rate = options.rate !== undefined ? options.rate : 1.0;
@@ -129,6 +151,7 @@ export class WebSpeechEngine {
       utterance.onend = () => {
         this.isSpeakingState = false;
         this.currentUtterance = null;
+        if (this.settlePending === settle) this.settlePending = null;
         if (options.onEnd) options.onEnd();
         resolve();
       };
@@ -136,6 +159,7 @@ export class WebSpeechEngine {
       utterance.onerror = (e) => {
         this.isSpeakingState = false;
         this.currentUtterance = null;
+        if (this.settlePending === settle) this.settlePending = null;
         // Ignore canceled errors triggered intentionally
         if (e.error === 'canceled' || e.error === 'interrupted') {
           resolve();

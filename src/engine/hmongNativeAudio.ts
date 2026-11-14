@@ -19,6 +19,18 @@ export interface NativeAudioBatchResult {
   source?: string;
 }
 
+/** Shape of the /api/audio/hmong-batch reply (only the fields this client reads). */
+interface NativeAudioBatchResponse {
+  results?: Record<string, NativeAudioBatchResult>;
+  /** True when the server left words out of this reply because the request exceeded its cap. */
+  truncated?: boolean;
+  /** How many of the requested words the server processed (the first N, in request order). */
+  processed?: number;
+}
+
+/** Most words the server processes per /api/audio/hmong-batch request (MAX_BATCH_WORDS in server.ts). */
+const NATIVE_BATCH_MAX_WORDS = 100;
+
 export interface NativeTrackAssemblyResult {
   buffer: AudioBuffer;
   alignment: SyllableAlignmentMetadata[];
@@ -94,7 +106,9 @@ export async function fetchAndDecodeNativeWord(
 }
 
 /**
- * Preloads a batch of native Hmong words in a single HTTP request and decodes them into AudioBuffers
+ * Preloads native Hmong words and decodes them into AudioBuffers. Words are requested from the server
+ * in chunks of at most NATIVE_BATCH_MAX_WORDS (its per-request cap) and the results are merged, so long
+ * texts are not silently cut off and left to the robotic fallback voice.
  */
 export async function preloadNativeWordsBatch(
   words: string[],
@@ -133,16 +147,23 @@ export async function preloadNativeWordsBatch(
     return resultMap;
   }
 
-  try {
-    const res = await fetch('/api/audio/hmong-batch', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ words: neededWords }),
-    });
+  // Requests run one after another: the server throttles upstream fetches per request and rate limits
+  // this route, so parallel chunks would only add load without finishing meaningfully sooner.
+  const queue = [...neededWords];
+  while (queue.length > 0) {
+    const chunk = queue.splice(0, NATIVE_BATCH_MAX_WORDS);
+    try {
+      const res = await fetch('/api/audio/hmong-batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ words: chunk }),
+      });
 
-    if (res.ok) {
-      const data = await res.json();
-      const results: Record<string, NativeAudioBatchResult> = data.results || {};
+      // Rate limited or server error: stop here, the remaining words use the acoustic fallback
+      if (!res.ok) break;
+
+      const data: NativeAudioBatchResponse = await res.json();
+      const results = data.results || {};
 
       await Promise.all(
         Object.entries(results).map(async ([w, info]) => {
@@ -159,9 +180,16 @@ export async function preloadNativeWordsBatch(
           }
         })
       );
+
+      // The server only processed the first `processed` words of this chunk (its cap is lower than
+      // ours): request the rest next. `processed > 0` guarantees every pass makes progress.
+      if (data.truncated && typeof data.processed === 'number' && data.processed > 0 && data.processed < chunk.length) {
+        queue.unshift(...chunk.slice(data.processed));
+      }
+    } catch {
+      // Graceful fallback to acoustic synthesis
+      break;
     }
-  } catch {
-    // Graceful fallback to acoustic synthesis
   }
 
   return resultMap;
@@ -214,7 +242,7 @@ function getActiveSpeechBounds(buffer: AudioBuffer): AudioTrimBounds {
     return fallback;
   }
 
-  // Energy threshold: 4% of peak or min 0.008
+  // Energy threshold: 1.5% of peak, with a floor of 0.004
   const threshold = Math.max(0.004, peak * 0.015);
 
   // 16ms protective onset pre-roll to preserve soft consonants (voiceless nasals hm/hn, fricatives s/x/z)
@@ -238,9 +266,19 @@ function getActiveSpeechBounds(buffer: AudioBuffer): AudioTrimBounds {
     }
   }
 
-  const startSample = Math.max(0, firstActive - onsetMargin);
-  const endSample = Math.min(len, lastActive + releaseMargin + 1);
-  const activeLength = Math.max(Math.floor(sampleRate * 0.08), endSample - startSample);
+  let startSample = Math.max(0, firstActive - onsetMargin);
+  let endSample = Math.min(len, lastActive + releaseMargin + 1);
+
+  // Keep every word at least 80 ms long, but only out of real samples: widen the window into the
+  // recording around the active speech (after it first, then before it) instead of declaring a longer
+  // length than the window holds, which made the render loop read past endSample and play silence.
+  // A recording shorter than 80 ms in total simply keeps its full real length.
+  const minLength = Math.floor(sampleRate * 0.08);
+  if (endSample - startSample < minLength) {
+    endSample = Math.min(len, startSample + minLength);
+    startSample = Math.max(0, endSample - minLength);
+  }
+  const activeLength = endSample - startSample;
 
   const bounds: AudioTrimBounds = { startSample, endSample, activeLength };
   trimBoundsCache.set(buffer, bounds);

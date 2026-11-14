@@ -91,7 +91,7 @@ function apiPlugin(): Plugin {
               if (req.url === '/api/tts/synthesize') {
                 const syllables = parseHmongText(data.text || '', (data.dialect || 'dawb') as HmongDialect);
                 const sampleRate = 44100;
-                const baseF0 = (data.voiceId?.includes('male') || data.voiceId?.includes('kaub')) ? 135 : 225;
+                const baseF0 = (!data.voiceId?.includes('female') && (data.voiceId?.includes('male') || data.voiceId?.includes('kaub'))) ? 135 : 225;
                 const validSyllables = syllables.filter(s => !s.isPunctuation);
                 const durPerSyl = Math.floor((sampleRate * 0.22) / (data.rate || 1.0));
                 const totalSamples = 2000 + validSyllables.length * durPerSyl + 4000;

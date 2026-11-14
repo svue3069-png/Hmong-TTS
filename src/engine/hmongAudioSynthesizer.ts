@@ -208,6 +208,9 @@ export class HmongAcousticEngine {
   private analyserNode: AnalyserNode | null = null;
   private animationFrameId: number | null = null;
   private activeTimers: number[] = [];
+  // Bumped by every stop() (and therefore every speak()). A speak() remembers the value it started
+  // with and abandons itself if the value has moved on while it was awaiting its render.
+  private speakGeneration = 0;
 
   constructor() {
     // Lazy AudioContext initialization on first user interaction
@@ -229,29 +232,34 @@ export class HmongAcousticEngine {
   }
 
   public stop(): void {
+    // Cancel any speak() that is still rendering so it cannot start playback once it resumes.
+    this.speakGeneration++;
+
     this.activeTimers.forEach(id => clearTimeout(id));
     this.activeTimers = [];
 
+    const src = this.currentSource;
+    const gain = this.currentGainNode;
+
     // Smooth gain ramp-down (15ms) prevents popping clicks when stopping
-    if (this.currentGainNode && this.ctx) {
+    if (gain && this.ctx) {
       try {
         const curTime = this.ctx.currentTime;
-        this.currentGainNode.gain.cancelScheduledValues(curTime);
-        this.currentGainNode.gain.setValueAtTime(this.currentGainNode.gain.value, curTime);
-        this.currentGainNode.gain.linearRampToValueAtTime(0, curTime + 0.015);
+        gain.gain.cancelScheduledValues(curTime);
+        gain.gain.setValueAtTime(gain.gain.value, curTime);
+        gain.gain.linearRampToValueAtTime(0, curTime + 0.015);
       } catch (_) {}
     }
 
-    if (this.currentSource) {
-      const src = this.currentSource;
+    if (src || gain) {
+      // Runs after the ramp-down; also releases the gain node so it stops feeding the shared analyser.
       window.setTimeout(() => {
-        try {
-          src.stop();
-          src.disconnect();
-        } catch (_) {}
+        try { src?.stop(); } catch (_) {}
+        try { src?.disconnect(); } catch (_) {}
+        try { gain?.disconnect(); } catch (_) {}
       }, 18);
-      this.currentSource = null;
     }
+    this.currentSource = null;
     this.currentGainNode = null;
     this.isSpeaking = false;
     if (this.animationFrameId) {
@@ -640,8 +648,10 @@ export class HmongAcousticEngine {
       // -m tone (Low creaky / vocal fry with abrupt glottal closure):
       let isCreakPeriod = false;
       if (toneInfo.letter === 'm' && progress > 0.35) {
-        // Subharmonic period doubling for vocal fry
-        const fryMod = Math.sin(phase * Math.PI) > 0 ? 0.88 : 1.12;
+        // Subharmonic period doubling for vocal fry: alternate long/short glottal periods.
+        // `phase` wraps every glottal cycle and stays in [0, 1), so sin(phase * PI) is never negative;
+        // toggling on the cycle-count parity is what actually alternates the period.
+        const fryMod = prevPeriodCount % 2 === 0 ? 0.88 : 1.12;
         curF0 *= (0.85 * fryMod);
         isCreakPeriod = true;
       }
@@ -805,23 +815,35 @@ export class HmongAcousticEngine {
     options: SynthesisOptions = {}
   ): Promise<void> {
     this.stop();
+    // stop() or a newer speak() can run while this call is awaiting its render (which may wait on the
+    // network). Every continuation checks isCurrent() so a cancelled/superseded request returns
+    // quietly instead of starting a source or touching state that now belongs to someone else.
+    const gen = ++this.speakGeneration;
+    const isCurrent = () => gen === this.speakGeneration;
     const ctx = this.getAudioContext();
     this.isSpeaking = true;
 
     if (options.onStart) options.onStart();
+    if (!isCurrent()) return; // onStart itself stopped or restarted the engine
+
+    let source: AudioBufferSourceNode | undefined;
+    let gainNode: GainNode | undefined;
 
     try {
       const { buffer, syllables, alignment, totalDuration } = await this.renderToAudioBuffer(text, dialect, options);
+      if (!isCurrent()) return;
 
       // Create audio nodes
-      const source = ctx.createBufferSource();
-      source.buffer = buffer;
+      const src = ctx.createBufferSource();
+      source = src;
+      src.buffer = buffer;
 
       const startTime = ctx.currentTime;
-      const gainNode = ctx.createGain();
+      const gain = ctx.createGain();
+      gainNode = gain;
       const targetVolume = options.volume !== undefined ? options.volume : 1.0;
-      gainNode.gain.setValueAtTime(0, startTime);
-      gainNode.gain.linearRampToValueAtTime(targetVolume, startTime + 0.010);
+      gain.gain.setValueAtTime(0, startTime);
+      gain.gain.linearRampToValueAtTime(targetVolume, startTime + 0.010);
 
       // Set up analyser node for real-time waveform visualizers
       if (!this.analyserNode) {
@@ -830,19 +852,19 @@ export class HmongAcousticEngine {
         this.analyserNode.smoothingTimeConstant = 0.8;
       }
 
-      source.connect(gainNode);
-      gainNode.connect(this.analyserNode);
+      src.connect(gain);
+      gain.connect(this.analyserNode);
       this.analyserNode.connect(ctx.destination);
 
-      this.currentSource = source;
-      this.currentGainNode = gainNode;
+      this.currentSource = src;
+      this.currentGainNode = gain;
 
       // Schedule exact real-time syllable events using calculated alignment
       if (options.onSyllable) {
         alignment.forEach((item) => {
           if (!item.isPunctuation) {
             const timerId = window.setTimeout(() => {
-              if (this.isSpeaking && options.onSyllable) {
+              if (isCurrent() && this.isSpeaking && options.onSyllable) {
                 const foundSyl = syllables[item.index] || {
                   raw: item.token,
                   clean: item.clean,
@@ -855,19 +877,31 @@ export class HmongAcousticEngine {
         });
       }
 
-      source.onended = () => {
-        this.activeTimers.forEach(id => clearTimeout(id));
-        this.activeTimers = [];
-        this.isSpeaking = false;
-        this.currentSource = null;
-        this.currentGainNode = null;
-        if (options.onEnd) options.onEnd();
+      src.onended = () => {
+        // A source that was stopped or replaced ends late, after newer state may already exist.
+        // Only the source that is still current may reset the engine state.
+        if (this.currentSource === src) {
+          this.activeTimers.forEach(id => clearTimeout(id));
+          this.activeTimers = [];
+          this.isSpeaking = false;
+          this.currentSource = null;
+          this.currentGainNode = null;
+        }
+        // Release the nodes: an undisconnected gain node would stay attached to the shared analyser.
+        try { src.disconnect(); } catch (_) {}
+        try { gain.disconnect(); } catch (_) {}
+        if (isCurrent() && options.onEnd) options.onEnd();
       };
 
-      source.start(startTime);
+      src.start(startTime);
     } catch (err) {
+      try { source?.disconnect(); } catch (_) {}
+      try { gainNode?.disconnect(); } catch (_) {}
+      // A cancelled/superseded request has nothing to report and must not clobber the newer state.
+      if (!isCurrent()) return;
       this.isSpeaking = false;
       this.currentSource = null;
+      this.currentGainNode = null;
       if (options.onError) {
         options.onError(err instanceof Error ? err : new Error(String(err)));
       } else {

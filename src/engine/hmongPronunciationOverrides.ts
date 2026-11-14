@@ -29,6 +29,22 @@ export interface PronunciationOverride {
 const STORAGE_KEY = 'hmong.tts.pronunciation.corrections.v2';
 
 /**
+ * Own-property check for plain-object tables. A bare `table[word]` lets user-controlled words such as
+ * "constructor" resolve to Object.prototype members, which then masquerade as table entries.
+ */
+const hasOwn = (table: object, key: string): boolean => Object.prototype.hasOwnProperty.call(table, key);
+
+/** An entry is usable only when it carries a non-empty string `word`; sorting and lookups rely on it. */
+function hasValidWord(item: unknown): item is PronunciationOverride {
+  return (
+    typeof item === 'object' &&
+    item !== null &&
+    typeof (item as { word?: unknown }).word === 'string' &&
+    (item as { word: string }).word.trim().length > 0
+  );
+}
+
+/**
  * High-frequency verified Hmong RPA words with native IPA and English-friendly respellings
  * from Hmoob TTS Studio lexicon and Hmong Dictionary archives
  */
@@ -441,8 +457,9 @@ class PronunciationOverrideStore {
         if (raw) {
           const parsed = JSON.parse(raw);
           if (Array.isArray(parsed)) {
-            parsed.forEach((item: PronunciationOverride) => {
-              if (item && item.word) {
+            parsed.forEach((item: unknown) => {
+              // A malformed stored entry must not abort loading of the entries after it.
+              if (hasValidWord(item)) {
                 this.cache.set(item.word.toLowerCase().trim(), {
                   ...item,
                   source: 'user',
@@ -470,10 +487,21 @@ class PronunciationOverrideStore {
   }
 
   /**
+   * Drops cache entries that lack a usable `word`. They can only appear through corrupted storage or
+   * external mutation, and one of them would otherwise make every later sort/lookup throw.
+   */
+  private purgeInvalidEntries(): void {
+    for (const [key, item] of this.cache) {
+      if (!hasValidWord(item)) this.cache.delete(key);
+    }
+  }
+
+  /**
    * Retrieves all overrides (both system presets and user fixes)
    */
   public getAll(): PronunciationOverride[] {
     if (!this.isLoaded) this.load();
+    this.purgeInvalidEntries();
     return Array.from(this.cache.values()).sort((a, b) => a.word.localeCompare(b.word));
   }
 
@@ -482,6 +510,7 @@ class PronunciationOverrideStore {
    */
   public getUserOverrides(): PronunciationOverride[] {
     if (!this.isLoaded) this.load();
+    this.purgeInvalidEntries();
     return Array.from(this.cache.values()).filter((i) => i.source === 'user');
   }
 
@@ -491,7 +520,12 @@ class PronunciationOverrideStore {
   public get(word: string): PronunciationOverride | undefined {
     if (!this.isLoaded) this.load();
     const clean = word.toLowerCase().replace(/[^a-zA-Z]/g, '').trim();
-    return this.cache.get(clean);
+    const item = this.cache.get(clean);
+    if (item !== undefined && !hasValidWord(item)) {
+      this.cache.delete(clean);
+      return undefined;
+    }
+    return item;
   }
 
   /**
@@ -526,7 +560,9 @@ class PronunciationOverrideStore {
     const clean = word.toLowerCase().replace(/[^a-zA-Z]/g, '').trim();
     if (!this.cache.has(clean)) return false;
 
-    if (DEFAULT_PRONUNCIATION_OVERRIDES[clean]) {
+    // Own-property check: a bare lookup is truthy for "constructor" and friends, which would
+    // install an Object.prototype member as the "preset" and corrupt the cache.
+    if (hasOwn(DEFAULT_PRONUNCIATION_OVERRIDES, clean)) {
       // Revert to preset
       this.cache.set(clean, {
         ...DEFAULT_PRONUNCIATION_OVERRIDES[clean],
@@ -568,12 +604,12 @@ class PronunciationOverrideStore {
       if (!Array.isArray(data)) return 0;
       let count = 0;
       data.forEach((item) => {
-        if (item && item.word && item.respelling) {
+        if (item && typeof item.word === 'string' && item.word && typeof item.respelling === 'string' && item.respelling) {
           this.set({
             word: item.word,
             respelling: item.respelling,
             ipa: item.ipa || '',
-            toneLetter: item.toneLetter || '',
+            toneLetter: typeof item.toneLetter === 'string' ? item.toneLetter : '',
             chaoNumber: item.chaoNumber,
             gloss: item.gloss,
             note: item.note,

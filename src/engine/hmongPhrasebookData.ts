@@ -280,7 +280,8 @@ export const HMONG_PHRASES: HmongPhraseItem[] = [
   { id: 'n_11', hmong: 'kaum ib', english: 'Eleven (11)', category: 'numbers', literalMeaning: 'Ten one' },
   { id: 'n_12', hmong: 'nees nkaum', english: 'Twenty (20)', category: 'numbers' },
   { id: 'n_13', hmong: 'peb caug', english: 'Thirty (30)', category: 'numbers' },
-  { id: 'n_14', hmong: 'ib pua', english: 'One hundred (100)', category: 'numbers' },
+  // Must match numberToHmong(100) in hmongPhonology.ts ("ib puas").
+  { id: 'n_14', hmong: 'ib puas', english: 'One hundred (100)', category: 'numbers' },
   { id: 'n_15', hmong: 'ib txhiab', english: 'One thousand (1,000)', category: 'numbers' },
 
   /* ---- Family & People ---- */
@@ -295,7 +296,10 @@ export const HMONG_PHRASES: HmongPhraseItem[] = [
   { id: 'f_09', hmong: 'poj niam', english: 'Wife / Woman', category: 'family' },
   { id: 'f_10', hmong: 'txiv neej', english: 'Husband / Man', category: 'family' },
   { id: 'f_11', hmong: 'yawg', english: 'Grandfather (paternal)', category: 'family' },
-  { id: 'f_12', hmong: 'puj / niam tais', english: 'Grandmother', category: 'family' },
+  // `hmong` is spoken verbatim and shown as-is (there is no separate spoken field), so alternate
+  // forms are separate records rather than "a / b" text that would be read aloud as a "/" token.
+  { id: 'f_12', hmong: 'puj', english: 'Grandmother', category: 'family', note: 'Also said "niam tais".' },
+  { id: 'f_13', hmong: 'niam tais', english: 'Grandmother', category: 'family', note: 'Alternate term for "puj".' },
 
   /* ---- Food & Dining ---- */
   { id: 'd_01', hmong: 'mov', english: 'Cooked rice / Meal', category: 'food', note: 'The staple food of Hmong daily life.' },

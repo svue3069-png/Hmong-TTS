@@ -1,10 +1,35 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useLayoutEffect } from 'react';
 import { CODE_SNIPPETS } from '../sdk/codeSnippets';
 import { Copy, Check, Terminal, Smartphone, Code2, Globe, Send, Play, Download, FolderArchive } from 'lucide-react';
 import { HmongTTSClient } from '../sdk/HmongTTSClient';
 import { HmongDialect } from '../engine/hmongPhonology';
 import { BatchProcessingTab } from './BatchProcessingTab';
 import { taskCoordinator } from '../engine/taskCoordinator';
+
+/**
+ * Object URL for a blob that stays stable across renders and is revoked when the blob changes or
+ * the component unmounts. (Calling URL.createObjectURL inline in JSX made a new, never-revoked URL
+ * on every render.)
+ */
+function useObjectUrl(blob: Blob | null): string | null {
+  const [entry, setEntry] = useState<{ blob: Blob; url: string } | null>(null);
+
+  // Layout effect: swap URLs before paint so no frame shows a missing or already-revoked href.
+  useLayoutEffect(() => {
+    if (!blob) {
+      setEntry(null);
+      return;
+    }
+    const url = URL.createObjectURL(blob);
+    setEntry({ blob, url });
+    return () => {
+      URL.revokeObjectURL(url);
+    };
+  }, [blob]);
+
+  // Never expose the URL of an older blob: it is revoked as soon as the effect above re-runs.
+  return entry && entry.blob === blob ? entry.url : null;
+}
 
 export const DeveloperHub: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'javascript' | 'reactNative' | 'flutter' | 'restApi' | 'batch'>('javascript');
@@ -18,6 +43,14 @@ export const DeveloperHub: React.FC = () => {
   const [apiResponse, setApiResponse] = useState<any | null>(null);
   const [downloadBlob, setDownloadBlob] = useState<Blob | null>(null);
   const [latencyMs, setLatencyMs] = useState<number | null>(null);
+
+  // Download links: one object URL per underlying blob, revoked when the blob is replaced or on unmount.
+  const metadataBlob = useMemo(
+    () => (apiResponse ? new Blob([JSON.stringify(apiResponse, null, 2)], { type: 'application/json' }) : null),
+    [apiResponse],
+  );
+  const wavDownloadUrl = useObjectUrl(downloadBlob);
+  const metadataDownloadUrl = useObjectUrl(metadataBlob);
 
   const client = new HmongTTSClient({ dialect: sandboxDialect });
 
@@ -243,9 +276,9 @@ export const DeveloperHub: React.FC = () => {
             <span>{isSynthesizing ? 'Synthesizing...' : 'Execute Test & Audition'}</span>
           </button>
 
-          {downloadBlob && (
+          {wavDownloadUrl && (
             <a
-              href={URL.createObjectURL(downloadBlob)}
+              href={wavDownloadUrl}
               download={`hmong_${sandboxDialect}_${Date.now()}.wav`}
               className="flex items-center gap-1.5 px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-medium transition"
             >
@@ -254,9 +287,9 @@ export const DeveloperHub: React.FC = () => {
             </a>
           )}
 
-          {apiResponse && (
+          {metadataDownloadUrl && (
             <a
-              href={URL.createObjectURL(new Blob([JSON.stringify(apiResponse, null, 2)], { type: 'application/json' }))}
+              href={metadataDownloadUrl}
               download={`hmong_metadata_${sandboxDialect}_${Date.now()}.json`}
               className="flex items-center gap-1.5 px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-medium transition"
             >

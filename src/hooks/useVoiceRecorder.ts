@@ -55,11 +55,14 @@ export function useVoiceRecorder(options: UseVoiceRecorderOptions = {}) {
   const streamRef = useRef<MediaStream | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
+  const meterSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const animFrameRef = useRef<number | null>(null);
   const timerIntervalRef = useRef<number | null>(null);
   const audioElementRef = useRef<HTMLAudioElement | null>(null);
   const recognitionRef = useRef<any | null>(null);
   const recordingSpeedRef = useRef<number>(1.0);
+  // False once the hook has unmounted; lets async continuations (getUserMedia) release what they acquire.
+  const mountedRef = useRef<boolean>(true);
 
   // Detect if running inside an iframe (e.g. AI Studio preview)
   useEffect(() => {
@@ -72,7 +75,10 @@ export function useVoiceRecorder(options: UseVoiceRecorderOptions = {}) {
 
   // Clean up all resources on unmount
   useEffect(() => {
+    // Re-armed on every mount so a StrictMode mount/unmount/mount cycle doesn't leave it false.
+    mountedRef.current = true;
     return () => {
+      mountedRef.current = false;
       stopTracks();
       if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
@@ -83,6 +89,7 @@ export function useVoiceRecorder(options: UseVoiceRecorderOptions = {}) {
       if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
         audioContextRef.current.close().catch(() => {});
       }
+      audioContextRef.current = null;
       if (recognitionRef.current) {
         try {
           recognitionRef.current.stop();
@@ -124,16 +131,38 @@ export function useVoiceRecorder(options: UseVoiceRecorderOptions = {}) {
     setErrorType(null);
   }, []);
 
+  // One AudioContext serves every level meter for the hook's lifetime. Creating a new one per
+  // recording leaked contexts until the browser's concurrent-context cap was hit, which then
+  // silently disabled the meter (the catch in startLevelMeter only logs a warning).
+  const getMeterContext = (): AudioContext | null => {
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioCtx) return null;
+    let ctx: AudioContext | null = audioContextRef.current;
+    if (!ctx || ctx.state === 'closed') {
+      ctx = new AudioCtx() as AudioContext;
+      audioContextRef.current = ctx;
+    }
+    if (ctx.state === 'suspended') {
+      ctx.resume().catch(() => {});
+    }
+    return ctx;
+  };
+
   const startLevelMeter = (stream: MediaStream) => {
     try {
-      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-      if (!AudioCtx) return;
-      const ctx = new AudioCtx();
-      audioContextRef.current = ctx;
+      const ctx = getMeterContext();
+      if (!ctx) return;
+
+      // Detach the previous recording's meter from the shared context before wiring up a new one.
+      if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+      try { meterSourceRef.current?.disconnect(); } catch (_) {}
+      try { analyserRef.current?.disconnect(); } catch (_) {}
+
       const analyser = ctx.createAnalyser();
       analyser.fftSize = 256;
       analyserRef.current = analyser;
       const source = ctx.createMediaStreamSource(stream);
+      meterSourceRef.current = source;
       source.connect(analyser);
 
       const dataArray = new Uint8Array(analyser.frequencyBinCount);
@@ -173,6 +202,12 @@ export function useVoiceRecorder(options: UseVoiceRecorderOptions = {}) {
           autoGainControl: true,
         },
       });
+      if (!mountedRef.current) {
+        // Unmounted while the permission prompt was open: the unmount cleanup already ran and
+        // nothing will ever stop this stream, so release the microphone right away.
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
       taskCoordinator.notifyTaskStarted('voice_recorder');
       streamRef.current = stream;
 
@@ -518,8 +553,9 @@ function safelyTeardownAudioElement(audio: HTMLAudioElement | null) {
       const sampleRate = 44100;
       const durationSec = 1.8;
       const numSamples = Math.floor(sampleRate * durationSec);
-      const audioBuffer = new AudioContext().createBuffer(1, numSamples, sampleRate);
-      const channel = audioBuffer.getChannelData(0);
+      // A plain sample array is enough: the clip is only encoded to WAV bytes below, so it needs no
+      // AudioContext (one was created and never closed on every call).
+      const channel = new Float32Array(numSamples);
 
       // Acoustic wave simulating natural speech formants
       for (let i = 0; i < numSamples; i++) {
@@ -567,6 +603,13 @@ function safelyTeardownAudioElement(audio: HTMLAudioElement | null) {
       const sampleBlob = new Blob([arrayBuffer], { type: 'audio/wav' });
       const url = URL.createObjectURL(sampleBlob);
 
+      // Release the blob URL of the recording being replaced (same as loadAudioFile).
+      if (recording?.url) {
+        try {
+          URL.revokeObjectURL(recording.url);
+        } catch (_) {}
+      }
+
       setRecording({
         blob: sampleBlob,
         url,
@@ -580,7 +623,7 @@ function safelyTeardownAudioElement(audio: HTMLAudioElement | null) {
     } catch (e) {
       console.error('Generate practice sample error:', e);
     }
-  }, [clearError]);
+  }, [clearError, recording]);
 
   return {
     isRecording,

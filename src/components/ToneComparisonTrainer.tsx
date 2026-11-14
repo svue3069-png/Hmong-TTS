@@ -24,6 +24,7 @@ import {
 import {
   extractPitchContour,
   comparePitchContours,
+  MIN_VOICED_DURATION_MS,
   PitchContourResult,
   PitchComparisonResult,
 } from '../engine/pitchDetection';
@@ -68,12 +69,20 @@ const PRACTICE_WORDS: Record<string, { dawb: string; leeg: string; gloss: string
   d: { dawb: 'pod', leeg: 'pod', gloss: 'sandhi variant (Sandhi Nce Qis)' },
 };
 
+/**
+ * Maps any incoming tone key onto a real HMONG_TONES key (falling back to the high-level tone 'b').
+ * The own-property check keeps strings such as "constructor" from resolving to Object.prototype
+ * members, so every `HMONG_TONES[...]`/`PRACTICE_WORDS[...]` lookup below sees a valid tone.
+ */
+const sanitizeToneKey = (key: string): string =>
+  Object.prototype.hasOwnProperty.call(HMONG_TONES, key) ? key : 'b';
+
 export const ToneComparisonTrainer: React.FC<ToneComparisonTrainerProps> = ({
   initialTone = 'b',
   dialect: propDialect = 'dawb',
   onOpenToneGuide,
 }) => {
-  const [selectedToneKey, setSelectedToneKey] = useState<string>(initialTone);
+  const [selectedToneKey, setSelectedToneKey] = useState<string>(() => sanitizeToneKey(initialTone));
   const [dialect, setDialect] = useState<HmongDialect>(propDialect);
   const [customWord, setCustomWord] = useState<string>('');
   const [selectedVoiceId, setSelectedVoiceId] = useState<string>('paj_dawb_female');
@@ -122,7 +131,7 @@ export const ToneComparisonTrainer: React.FC<ToneComparisonTrainerProps> = ({
   // Sync initial tone
   useEffect(() => {
     if (initialTone !== undefined) {
-      setSelectedToneKey(initialTone);
+      setSelectedToneKey(sanitizeToneKey(initialTone));
     }
   }, [initialTone]);
 
@@ -700,14 +709,15 @@ export const ToneComparisonTrainer: React.FC<ToneComparisonTrainerProps> = ({
   // Current scrubber coordinate
   const currentInspectorData = useMemo(() => {
     const prog = playheadProgress !== null ? playheadProgress : hoverProgress;
-    if (prog === null || !comparisonResult) return null;
+    if (prog === null || !comparisonResult || comparisonResult.targetPoints.length === 0) return null;
 
     const idx = Math.min(
       comparisonResult.targetPoints.length - 1,
       Math.max(0, Math.floor(prog * (comparisonResult.targetPoints.length - 1)))
     );
     const targetPt = comparisonResult.targetPoints[idx];
-    const userPt = userContour ? comparisonResult.userPoints[idx] : null;
+    // An unscorable clip has no user points, so there is no user marker to draw.
+    const userPt = userContour && !comparisonResult.insufficientAudio ? comparisonResult.userPoints[idx] ?? null : null;
 
     const targetY = getYCoord(targetPt);
     const userY = userPt ? getYCoord(userPt) : null;
@@ -1247,7 +1257,7 @@ export const ToneComparisonTrainer: React.FC<ToneComparisonTrainerProps> = ({
           </div>
 
           {/* Pronunciation Match Evaluation Card */}
-          {comparisonResult && userContour ? (
+          {comparisonResult && userContour && !comparisonResult.insufficientAudio ? (
             <div className="p-4 rounded-xl bg-slate-950/90 border border-slate-800/80 space-y-4">
               {/* Score Header */}
               <div className="flex items-center justify-between pb-3 border-b border-slate-800/60">
@@ -1359,6 +1369,24 @@ export const ToneComparisonTrainer: React.FC<ToneComparisonTrainerProps> = ({
                   </div>
                 )}
               </div>
+            </div>
+          ) : comparisonResult && userContour ? (
+            /* The clip held too little voiced speech to score: guide the user instead of showing a score or grade */
+            <div
+              role="alert"
+              className="p-5 rounded-xl bg-amber-950/30 border border-amber-800/60 text-center space-y-2"
+            >
+              <div className="w-10 h-10 rounded-full bg-amber-950/60 border border-amber-700/60 flex items-center justify-center mx-auto">
+                <AlertTriangle className="w-5 h-5 text-amber-400" />
+              </div>
+              <h4 className="text-sm font-bold text-amber-200">
+                No voiced speech detected — try recording again
+              </h4>
+              <p className="text-[11px] text-amber-300/80 max-w-xs mx-auto leading-relaxed">
+                Too little clear voiced sound was found in this recording (at least {MIN_VOICED_DURATION_MS} ms is
+                needed), so no score or grade is shown. Speak the syllable clearly, hold the vowel for about half a
+                second, and check that your microphone is not muted.
+              </p>
             </div>
           ) : (
             /* Prompt to Record */

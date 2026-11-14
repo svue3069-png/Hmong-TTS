@@ -22,11 +22,23 @@ export interface HmongToneInfo {
 
 import { hmongPronunciationStore } from './hmongPronunciationOverrides.ts';
 
+/**
+ * Own-property check for the plain-object lookup tables in this module. A bare `table[key]` lets
+ * user-controlled words such as "constructor" resolve to Object.prototype members.
+ */
+const hasOwn = (table: object, key: string): boolean => Object.prototype.hasOwnProperty.call(table, key);
+
 export interface SyllableDecomposition {
   raw: string;
   clean: string;
   onset: string;
   vowel: string;
+  /**
+   * True when the rime was not an exact match for a known vowel: either only a prefix matched
+   * (e.g. "iai" resolves to "ia") or nothing matched (e.g. "b" or "th"). In the latter case `vowel`
+   * keeps the letters as written, `ipa` omits the vowel, and the acoustic model falls back to /a/.
+   */
+  vowelApproximated?: boolean;
   toneLetter: string;
   tone: HmongToneInfo;
   ipa: string;
@@ -228,7 +240,88 @@ const ONSET_CONSONANTS_LEEG = [
 ];
 
 const VOWEL_KEYS = ['aaw', 'ai', 'au', 'aw', 'aa', 'ee', 'oo', 'ia', 'ua', 'a', 'e', 'i', 'o', 'u', 'w'];
+// Always match rimes longest-first so a multi-character rime wins over its own prefix ("aaw" before "aa" before "a").
+const VOWEL_KEYS_LONGEST_FIRST = [...VOWEL_KEYS].sort((a, b) => b.length - a.length);
 const TONE_KEYS = ['b', 'j', 'v', 's', 'g', 'm', 'd'];
+
+// Non-empty onsets of either dialect; '' (vowel-initial syllables) is tried separately.
+const ALL_RPA_ONSETS = Array.from(new Set([...ONSET_CONSONANTS_DAWB, ...ONSET_CONSONANTS_LEEG])).filter(
+  (onset) => onset.length > 0
+);
+const ALL_RPA_ONSETS_WITH_EMPTY = ['', ...ALL_RPA_ONSETS];
+
+/** True when `tail` (everything after the onset) is a known rime, optionally followed by one tone letter. */
+function isRimeWithOptionalTone(tail: string): boolean {
+  if (VOWEL_KEYS.includes(tail)) return true;
+  return tail.length > 1 && TONE_KEYS.includes(tail[tail.length - 1]) && VOWEL_KEYS.includes(tail.slice(0, -1));
+}
+
+/**
+ * How well a word fits Romanized Popular Alphabet structure.
+ * - 'syllable': exactly one well-formed syllable, [onset] + known rime + optional tone letter ("tshiab", "ib")
+ * - 'compound': splits entirely into several such syllables ("menyuam", "askiv")
+ * - 'none': cannot be built from RPA syllables at all (internal/final consonants such as "hand", "plan", "bags")
+ */
+export type RpaShape = 'syllable' | 'compound' | 'none';
+
+export function classifyRpaShape(word: string): RpaShape {
+  const w = word.toLowerCase();
+  if (!/^[a-z]+$/.test(w)) return 'none';
+
+  if (ALL_RPA_ONSETS_WITH_EMPTY.some((onset) => w.startsWith(onset) && isRimeWithOptionalTone(w.slice(onset.length)))) {
+    return 'syllable';
+  }
+
+  // Multi-syllable check: every syllable consumes at least one character, so the recursion terminates.
+  const memo = new Map<number, boolean>();
+  const canSegment = (start: number): boolean => {
+    if (start === w.length) return true;
+    const cached = memo.get(start);
+    if (cached !== undefined) return cached;
+    let ok = false;
+    for (const onset of ALL_RPA_ONSETS_WITH_EMPTY) {
+      if (!w.startsWith(onset, start)) continue;
+      const rimeStart = start + onset.length;
+      for (const rime of VOWEL_KEYS_LONGEST_FIRST) {
+        if (!w.startsWith(rime, rimeStart)) continue;
+        const rimeEnd = rimeStart + rime.length;
+        if (canSegment(rimeEnd) || (TONE_KEYS.includes(w[rimeEnd]) && canSegment(rimeEnd + 1))) {
+          ok = true;
+          break;
+        }
+      }
+      if (ok) break;
+    }
+    memo.set(start, ok);
+    return ok;
+  };
+  return canSegment(0) ? 'compound' : 'none';
+}
+
+/** True when `word` is exactly one well-formed RPA syllable: [onset] + known rime + optional tone letter. */
+export function isValidRpaSyllable(word: string): boolean {
+  return classifyRpaShape(word) === 'syllable';
+}
+
+interface ResolvedRime {
+  /** The rime reported on the syllable: the exact key, the matched prefix, or the letters as written. */
+  vowel: string;
+  /** Key into HMONG_VOWELS used for formants/IPA; undefined when nothing matched (caller falls back to /a/). */
+  acousticKey?: string;
+  approximated: boolean;
+}
+
+/**
+ * Resolves the nucleus of a syllable without ever inventing a vowel:
+ * (a) exact match against the known rimes, (b) otherwise the longest known rime that is a prefix,
+ * (c) otherwise the letters as written, flagged as approximated.
+ */
+function resolveRime(rime: string): ResolvedRime {
+  if (VOWEL_KEYS_LONGEST_FIRST.includes(rime)) return { vowel: rime, acousticKey: rime, approximated: false };
+  const prefix = VOWEL_KEYS_LONGEST_FIRST.find((key) => rime.startsWith(key));
+  if (prefix) return { vowel: prefix, acousticKey: prefix, approximated: true };
+  return { vowel: rime, acousticKey: undefined, approximated: true };
+}
 
 const HMONG_NUMBER_ONES = ['xoom', 'ib', 'ob', 'peb', 'plaub', 'tsib', 'rau', 'xya', 'yim', 'cuaj'];
 
@@ -288,6 +381,8 @@ export const ONSET_RESPELLING: Record<string, string> = {
   nc: 'unj', nj: 'unj', kh: 'k', nk: 'ungk', qh: 'k',
   nq: 'unk', nz: 'unzh', nx: 'uns', ns: 'unsh', hm: 'm',
   hn: 'n', hl: 'l', xy: 'sh', tx: 'ts', ts: 'ts',
+  // Devoiced sonorants drop the breathy "h" for English readers, matching hm/hn/hl above.
+  hml: 'ml', hny: 'ny', ml: 'ml',
   ny: 'ny', p: 'p', t: 't', d: 'd', b: 'b', c: 'ch',
   k: 'k', q: 'k', f: 'f', v: 'v', x: 's', s: 'sh',
   z: 'zh', h: 'h', l: 'l', m: 'm', n: 'n', r: 'tr',
@@ -297,6 +392,8 @@ export const ONSET_RESPELLING: Record<string, string> = {
 
 export const RIME_RESPELLING: Record<string, string> = {
   iai: 'ee-uh', uai: 'oo-uh', ia: 'ee-uh', ua: 'oo-uh',
+  // Moob Leeg long "aw" [aːɨ]: a held "ah" gliding into the "uh" of aw, written like the other glides.
+  aaw: 'ah-uh',
   ai: 'ye', au: 'ow', aw: 'uh', ee: 'ay', oo: 'aw',
   aa: 'ah', a: 'ah', e: 'eh', i: 'ee', o: 'aw',
   u: 'oo', w: 'uh',
@@ -418,53 +515,59 @@ export function parseHmongSyllable(token: string, dialect: HmongDialect = 'dawb'
     }
   }
 
-  // Remaining string is the nucleus vowel
-  let vowel = remainder;
-  // Fallback if vowel wasn't cleanly captured
-  if (!VOWEL_KEYS.includes(vowel)) {
-    // Attempt match with known vowels
-    const match = VOWEL_KEYS.find(v => vowel.startsWith(v));
-    vowel = match || (vowel.length > 0 ? vowel[0] : 'a');
-  }
+  // Remaining string is the nucleus (rime). Match it exactly first, then by longest known prefix.
+  // If neither works the letters are kept as written (never swapped for an invented vowel) and the
+  // syllable is flagged via `vowelApproximated`; the acoustic model keeps its old /a/ fallback so
+  // synthesis does not break.
+  const rime = resolveRime(remainder);
+  const vowel = rime.vowel;
+  const formantInfo =
+    rime.acousticKey !== undefined && hasOwn(HMONG_VOWELS, rime.acousticKey)
+      ? HMONG_VOWELS[rime.acousticKey]
+      : HMONG_VOWELS['a'];
 
-  const toneInfo = HMONG_TONES[toneLetter] || HMONG_TONES[''];
-  const formantInfo = HMONG_VOWELS[vowel] || HMONG_VOWELS['a'];
+  // Pronunciation overrides are resolved before any tone-dependent value is derived, so the tone
+  // object, IPA tone marks, duration and pitch trajectory below all come from ONE effective tone.
+  const override = hmongPronunciationStore.get(pureWord);
+  // '' is the unmarked mid tone and a valid explicit override; only an absent or unrecognised
+  // letter falls back to the tone parsed from the spelling.
+  const overrideToneLetter =
+    override && typeof override.toneLetter === 'string' && hasOwn(HMONG_TONES, override.toneLetter)
+      ? override.toneLetter
+      : undefined;
+  const effectiveToneLetter = overrideToneLetter !== undefined ? overrideToneLetter : toneLetter;
+  const toneInfo = HMONG_TONES[effectiveToneLetter];
 
   // RPA timing follows the beginner pronunciation guide: the glottal -m tone
   // is clipped, while the long low-rising -d tone is held noticeably longer.
   let durationMs = 210;
   if (formantInfo.isDiphthong || formantInfo.isNasal) durationMs += 45;
-  if (toneLetter === 'm') durationMs -= 45; // abrupt glottal/creaky cutoff
-  if (toneLetter === 'b') durationMs -= 25; // crisp high-level tone
-  if (toneLetter === 'v') durationMs += 35; // mid-rising contour needs room
-  if (toneLetter === 'g') durationMs += 15; // breathy falling tone needs a softer release
-  if (toneLetter === 'd') durationMs += 55; // long low-rising tone
+  if (effectiveToneLetter === 'm') durationMs -= 45; // abrupt glottal/creaky cutoff
+  if (effectiveToneLetter === 'b') durationMs -= 25; // crisp high-level tone
+  if (effectiveToneLetter === 'v') durationMs += 35; // mid-rising contour needs room
+  if (effectiveToneLetter === 'g') durationMs += 15; // breathy falling tone needs a softer release
+  if (effectiveToneLetter === 'd') durationMs += 55; // long low-rising tone
 
-  // Build IPA transcription
+  // Build IPA transcription. An unmatched rime contributes no vowel symbol rather than a made-up one.
   const onsetIpa = getOnsetIpa(identifiedOnset, dialect);
-  const vowelIpa = formantInfo.ipa;
+  const vowelIpa = rime.acousticKey !== undefined ? formantInfo.ipa : '';
   const ipa = `[${onsetIpa}${vowelIpa}${toneInfo.ipaDiacritic}]`;
 
-  // Check pronunciation overrides
-  const override = hmongPronunciationStore.get(pureWord);
-
-  const onsetResp = ONSET_RESPELLING[identifiedOnset] || identifiedOnset;
-  const rimeResp = RIME_RESPELLING[vowel] || vowel;
+  const onsetResp = hasOwn(ONSET_RESPELLING, identifiedOnset) ? ONSET_RESPELLING[identifiedOnset] : identifiedOnset;
+  const rimeResp = hasOwn(RIME_RESPELLING, vowel) ? RIME_RESPELLING[vowel] : vowel;
   const defaultRespelling = `${onsetResp}${rimeResp}`.trim();
 
   const finalIpa = override?.ipa || ipa;
   const finalRespelling = override?.respelling || defaultRespelling;
-  const finalToneInfo = (override?.toneLetter !== undefined && HMONG_TONES[override.toneLetter])
-    ? HMONG_TONES[override.toneLetter]
-    : toneInfo;
 
   return {
     raw: token,
     clean: pureWord,
     onset: identifiedOnset,
     vowel,
-    toneLetter: override?.toneLetter || toneLetter,
-    tone: finalToneInfo,
+    vowelApproximated: rime.approximated,
+    toneLetter: effectiveToneLetter,
+    tone: toneInfo,
     ipa: finalIpa,
     englishRespelling: finalRespelling,
     gloss: override?.gloss,
@@ -484,7 +587,7 @@ export function parseHmongSyllable(token: string, dialect: HmongDialect = 'dawb'
       isNasal: formantInfo.isNasal,
     },
     durationMs,
-    pitchTrajectory: finalToneInfo.contour,
+    pitchTrajectory: toneInfo.contour,
     isPunctuation: false,
   };
 }
@@ -562,7 +665,7 @@ export function getOnsetIpa(onset: string, dialect: HmongDialect): string {
     if (onset === 'hn') return 'n';
   }
 
-  return map[onset] || onset;
+  return hasOwn(map, onset) && map[onset] ? map[onset] : onset;
 }
 
 // High-frequency White & Green Hmong Tone Sandhi Lexical Dictionary
@@ -627,7 +730,9 @@ export function parseHmongText(text: string, dialect: HmongDialect = 'dawb'): Sy
         prev.toneLetter === 'b' ||
         prev.toneLetter === 'j';
 
-      if (isSandhiTrigger && HMONG_SANDHI_PAIRS[curClean]) {
+      // Only explicit table entries may change a word's tone, and the lookup must be own-property
+      // so words like "constructor" never resolve to Object.prototype members.
+      if (isSandhiTrigger && hasOwn(HMONG_SANDHI_PAIRS, curClean)) {
         const sandhiWord = HMONG_SANDHI_PAIRS[curClean];
         // Parse the target word in its true sandhi form so acoustics, breathiness, and pitch contour match
         const sandhiParsed = parseHmongSyllable(sandhiWord, dialect);
@@ -637,21 +742,11 @@ export function parseHmongText(text: string, dialect: HmongDialect = 'dawb'): Sy
         sandhiParsed.sandhiShift = `${curClean} ➔ ${sandhiWord}`;
         results.push(sandhiParsed);
         continue;
-      } else if (isSandhiTrigger && (prev.toneLetter === 'b' || prev.toneLetter === 'j')) {
-        // General classifier sandhi shift for -s ending words (shift to breathy -g)
-        if (syllable.toneLetter === 's' && syllable.clean.length <= 4 && !syllable.isOverride) {
-          const candidate = syllable.clean.slice(0, -1) + 'g';
-          const sandhiParsed = parseHmongSyllable(candidate, dialect);
-          sandhiParsed.raw = token;
-          sandhiParsed.isToneSandhi = true;
-          sandhiParsed.originalWord = curClean;
-          sandhiParsed.sandhiShift = `${curClean} ➔ ${candidate}`;
-          results.push(sandhiParsed);
-          continue;
-        } else if (syllable.toneLetter === '') {
-          // Subtle inflection lift for unmarked mid tones in connected compounds
-          syllable.pitchTrajectory = [0.66, 0.62, 0.54, 0.44];
-        }
+      } else if (isSandhiTrigger && (prev.toneLetter === 'b' || prev.toneLetter === 'j') && syllable.toneLetter === '') {
+        // Subtle inflection lift for unmarked mid tones in connected compounds.
+        // There is deliberately no generic "-s becomes -g" rewrite here: a word after a -b/-j word
+        // changes tone only when it is listed in HMONG_SANDHI_PAIRS ("koj lus" must stay "lus").
+        syllable.pitchTrajectory = [0.66, 0.62, 0.54, 0.44];
       }
     }
 
